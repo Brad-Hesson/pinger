@@ -9,12 +9,7 @@ async fn main() {
         .for_each_concurrent(256*256, |i| {
             let client = &client;
             async move {
-                let addr = IpAddr::V4(Ipv4Addr::new(
-                    (i % 256).try_into().unwrap(),
-                    ((i >> 8 * 1) % 256).try_into().unwrap(),
-                    ((i >> 8 * 2) % 256).try_into().unwrap(),
-                    ((i >> 8 * 3) % 256).try_into().unwrap(),
-                ));
+                let addr = IpAddr::V4(i.into());
                 let mut pinger = client.pinger(addr, 0.into()).await;
                 let reply = pinger.ping(0.into(), &[]).await;
                 match reply {
