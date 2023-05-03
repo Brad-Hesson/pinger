@@ -13,7 +13,7 @@ async fn main() {
                 let mut pinger = client.pinger(addr, 0.into()).await;
                 let reply = pinger.ping(0.into(), &[]).await;
                 if let Ok(reply) = reply {
-                    println!("{addr} : {:?}", reply.1)
+                    println!("{addr:<15} : {:?}", reply.1)
                 }
             }
         })
