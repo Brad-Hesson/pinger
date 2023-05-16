@@ -2,12 +2,14 @@ use clap::Parser;
 use ipnet::Ipv4Net;
 use iprange::IpRange;
 use std::{
+    net::IpAddr,
     sync::{
         atomic::{AtomicUsize, Ordering},
         Arc,
     },
     time::{Duration, Instant},
 };
+use tokio::{sync::mpsc::UnboundedReceiver, task::JoinHandle};
 
 #[tokio::main]
 async fn main() {
@@ -25,6 +27,8 @@ async fn main() {
     let state = Arc::new(State::new(num_ips));
     let client = Arc::new(surge_ping::Client::new(&surge_ping::Config::default()).unwrap());
 
+    let (tx, rx) = tokio::sync::mpsc::unbounded_channel::<(IpAddr, JoinHandle<Option<Duration>>)>();
+    tokio::spawn(reciever(rx));
     tokio::spawn(printer(
         state.clone(),
         Duration::from_secs(args.update_interval),
@@ -33,7 +37,8 @@ async fn main() {
         let mut pinger = client.pinger(addr.into(), 0.into()).await;
         pinger.timeout(Duration::from_secs(args.timeout));
         state.running.fetch_add(1, Ordering::Release);
-        tokio::spawn(worker(pinger, state.clone()));
+        let handle = tokio::spawn(worker(pinger, state.clone()));
+        tx.send((addr.into(), handle)).unwrap();
         while state.running.load(Ordering::Acquire) >= args.num_concurrent {
             tokio::task::yield_now().await;
         }
@@ -42,6 +47,15 @@ async fn main() {
         tokio::task::yield_now().await;
     }
     tokio::time::sleep(Duration::from_secs(args.update_interval)).await;
+}
+
+async fn reciever(mut rx: UnboundedReceiver<(IpAddr, JoinHandle<Option<Duration>>)>) {
+    while let Some((addr, handle)) = rx.recv().await {
+        let maybe_dur = handle.await.unwrap();
+        if let Some(dur) = maybe_dur{
+            println!("{addr} | {dur:?}");
+        }
+    }
 }
 
 async fn printer(state: Arc<State>, interval: Duration) {
