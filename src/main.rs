@@ -2,14 +2,23 @@ use clap::Parser;
 use ipnet::Ipv4Net;
 use iprange::IpRange;
 use std::{
-    net::IpAddr,
+    fmt::Write,
+    io::SeekFrom,
+    path::PathBuf,
     sync::{
         atomic::{AtomicUsize, Ordering},
         Arc,
     },
     time::{Duration, Instant},
 };
-use tokio::{sync::mpsc::UnboundedReceiver, task::JoinHandle};
+use tokio::{
+    fs::{File, OpenOptions},
+    io::{AsyncSeekExt, AsyncWriteExt, BufWriter},
+    sync::mpsc::UnboundedReceiver,
+    task::JoinHandle,
+};
+
+const DATA_SIZE: u64 = std::mem::size_of::<f32>() as u64;
 
 #[tokio::main]
 async fn main() {
@@ -20,15 +29,32 @@ async fn main() {
     for n in args.subnets {
         range.add(n.parse().unwrap());
     }
+    let fname = path_from_range(range.clone()).unwrap();
+    let mut file = OpenOptions::new()
+        .write(true)
+        .create(true)
+        .open(fname)
+        .await
+        .unwrap();
+    let num_done = file.metadata().await.unwrap().len() / DATA_SIZE;
+    file.seek(SeekFrom::Start(num_done * DATA_SIZE))
+        .await
+        .unwrap();
+    let ips = range
+        .into_iter()
+        .flat_map(|net| net.hosts())
+        .skip(num_done as usize);
     let num_ips = range.into_iter().flat_map(|net| net.hosts()).count();
     println!("{num_ips} addresses to ping");
-    let ips = range.into_iter().flat_map(|net| net.hosts());
 
     let state = Arc::new(State::new(num_ips));
+    state
+        .num_done
+        .fetch_add(num_done as usize, Ordering::Release);
     let client = Arc::new(surge_ping::Client::new(&surge_ping::Config::default()).unwrap());
 
-    let (tx, rx) = tokio::sync::mpsc::unbounded_channel::<(IpAddr, JoinHandle<Option<Duration>>)>();
-    tokio::spawn(reciever(rx));
+    let (tx, rx) = tokio::sync::mpsc::unbounded_channel::<JoinHandle<Option<Duration>>>();
+    let reciever_h = tokio::spawn(reciever(rx, BufWriter::new(file)));
     tokio::spawn(printer(
         state.clone(),
         Duration::from_secs(args.update_interval),
@@ -38,24 +64,27 @@ async fn main() {
         pinger.timeout(Duration::from_secs(args.timeout));
         state.running.fetch_add(1, Ordering::Release);
         let handle = tokio::spawn(worker(pinger, state.clone()));
-        tx.send((addr.into(), handle)).unwrap();
+        tx.send(handle).unwrap();
         while state.running.load(Ordering::Acquire) >= args.num_concurrent {
             tokio::task::yield_now().await;
         }
     }
-    while state.running.load(Ordering::Acquire) > 0 {
-        tokio::task::yield_now().await;
-    }
+    drop(tx);
+    reciever_h.await.unwrap();
     tokio::time::sleep(Duration::from_secs(args.update_interval)).await;
 }
 
-async fn reciever(mut rx: UnboundedReceiver<(IpAddr, JoinHandle<Option<Duration>>)>) {
-    while let Some((addr, handle)) = rx.recv().await {
-        let maybe_dur = handle.await.unwrap();
-        if let Some(dur) = maybe_dur{
-            println!("{addr} | {dur:?}");
+async fn reciever(
+    mut rx: UnboundedReceiver<JoinHandle<Option<Duration>>>,
+    mut file: BufWriter<File>,
+) {
+    while let Some(handle) = rx.recv().await {
+        match handle.await.unwrap() {
+            Some(dur) => file.write_f32(dur.as_secs_f32()).await.unwrap(),
+            None => file.write_f32(-1.).await.unwrap(),
         }
     }
+    file.flush().await.unwrap();
 }
 
 async fn printer(state: Arc<State>, interval: Duration) {
@@ -90,6 +119,17 @@ async fn worker(mut pinger: surge_ping::Pinger, state: Arc<State>) -> Option<Dur
     state.num_done.fetch_add(1, Ordering::Release);
     state.running.fetch_sub(1, Ordering::Release);
     dur
+}
+
+fn path_from_range(mut range: IpRange<Ipv4Net>) -> Result<PathBuf, std::fmt::Error> {
+    range.simplify();
+    let mut name = String::new();
+    for net in range.iter() {
+        write!(name, "{}-{}_", net.network(), net.prefix_len())?;
+    }
+    name.pop();
+    write!(name, ".bin")?;
+    Ok(name.into())
 }
 
 struct State {
