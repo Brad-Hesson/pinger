@@ -8,9 +8,7 @@ edition = "2021"
 [dependencies]
 clap = { version = "4.2.7", features = ["derive"] }
 console-subscriber = "0.1.8"
-futures = "0.3.28"
 ipnet = "2.7.2"
 iprange = "0.6.7"
-itertools = "0.10.5"
 surge-ping = { path = "../surge-ping"}
 tokio = { version = "1.28.0", features = ["full"] }
