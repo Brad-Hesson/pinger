@@ -6,7 +6,7 @@ use std::{
     io::SeekFrom,
     path::PathBuf,
     sync::{
-        atomic::{AtomicUsize, Ordering},
+        atomic::{AtomicU64, AtomicUsize, Ordering},
         Arc,
     },
     time::{Duration, Instant},
@@ -26,16 +26,17 @@ async fn main() {
     console_subscriber::init();
 
     let mut range = IpRange::<Ipv4Net>::new();
-    for n in args.subnets {
-        range.add(n.parse().unwrap());
+    for net_string in args.subnets {
+        range.add(net_string.parse().unwrap());
     }
-    let fname = path_from_range(range.clone()).unwrap();
+
     let mut file = OpenOptions::new()
         .write(true)
         .create(true)
-        .open(fname)
+        .open(path_from_range(range.clone()).unwrap())
         .await
         .unwrap();
+
     let num_done = file.metadata().await.unwrap().len() / DATA_SIZE;
     file.seek(SeekFrom::Start(num_done * DATA_SIZE))
         .await
@@ -44,18 +45,17 @@ async fn main() {
         .into_iter()
         .flat_map(|net| net.hosts())
         .skip(num_done as usize);
-    let num_ips = range.into_iter().flat_map(|net| net.hosts()).count();
-    println!("{num_ips} addresses to ping");
+    
+    let total_num_ips = range.into_iter().flat_map(|net| net.hosts()).count();
+    println!("{total_num_ips} addresses to ping in total");
 
-    let state = Arc::new(State::new(num_ips));
-    state
-        .num_done
-        .fetch_add(num_done as usize, Ordering::Release);
+    let state = Arc::new(State::new(total_num_ips as u64, num_done));
     let client = Arc::new(surge_ping::Client::new(&surge_ping::Config::default()).unwrap());
 
     let (tx, rx) = tokio::sync::mpsc::unbounded_channel::<JoinHandle<Option<Duration>>>();
-    let reciever_h = tokio::spawn(reciever(rx, BufWriter::new(file)));
-    tokio::spawn(printer(
+
+    let reciever_h = tokio::spawn(file_writer(rx, BufWriter::new(file)));
+    tokio::spawn(stats_printer(
         state.clone(),
         Duration::from_secs(args.update_interval),
     ));
@@ -74,7 +74,7 @@ async fn main() {
     tokio::time::sleep(Duration::from_secs(args.update_interval)).await;
 }
 
-async fn reciever(
+async fn file_writer(
     mut rx: UnboundedReceiver<JoinHandle<Option<Duration>>>,
     mut file: BufWriter<File>,
 ) {
@@ -87,38 +87,27 @@ async fn reciever(
     file.flush().await.unwrap();
 }
 
-async fn printer(state: Arc<State>, interval: Duration) {
+async fn stats_printer(state: Arc<State>, interval: Duration) {
     let mut last_time = Instant::now();
-    let mut last_value = 0;
+    let mut last_value = state.num_done.load(Ordering::Acquire);
     loop {
+        tokio::time::sleep(interval).await;
+        let now = Instant::now();
         let done = state.num_done.load(Ordering::Acquire);
-        let replied = state.num_replied.load(Ordering::Acquire);
         let active = state.running.load(Ordering::Acquire);
         let perc_done = done as f64 / state.total as f64 * 100.;
-        let perc_replied = replied as f64 / done as f64 * 100.;
-        let now = Instant::now();
         let rate = (done - last_value) as f64 / (now - last_time).as_secs_f64();
         last_time = now;
         last_value = done;
-        println!(
-            "{perc_done:.3}% done | {perc_replied:.3}% replied | {rate:.2} p/s | {active} active",
-        );
-        tokio::time::sleep(interval).await;
+        println!("{perc_done:>7.3}% done | {rate:>9.2} p/s | {active:>6} active",);
     }
 }
 
 async fn worker(mut pinger: surge_ping::Pinger, state: Arc<State>) -> Option<Duration> {
     let reply = pinger.ping(0.into(), &[]).await;
-    let dur = match reply {
-        Ok((_, dur)) => Some(dur),
-        Err(_) => None,
-    };
-    if dur.is_some() {
-        state.num_replied.fetch_add(1, Ordering::Release);
-    }
     state.num_done.fetch_add(1, Ordering::Release);
     state.running.fetch_sub(1, Ordering::Release);
-    dur
+    reply.ok().map(|(_, dur)| dur)
 }
 
 fn path_from_range(mut range: IpRange<Ipv4Net>) -> Result<PathBuf, std::fmt::Error> {
@@ -133,16 +122,14 @@ fn path_from_range(mut range: IpRange<Ipv4Net>) -> Result<PathBuf, std::fmt::Err
 }
 
 struct State {
-    num_done: AtomicUsize,
-    num_replied: AtomicUsize,
+    num_done: AtomicU64,
     running: AtomicUsize,
-    total: usize,
+    total: u64,
 }
 impl State {
-    fn new(total: usize) -> Self {
+    fn new(total: u64, done: u64) -> Self {
         Self {
-            num_done: AtomicUsize::new(0),
-            num_replied: AtomicUsize::new(0),
+            num_done: AtomicU64::new(done),
             running: AtomicUsize::new(0),
             total,
         }
