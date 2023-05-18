@@ -18,6 +18,8 @@ struct Args {
 
 #[derive(Debug, clap::Subcommand)]
 enum Subcommand {
+    /// Ping a provided range of addresses and save the response durations to a file
     Ping(ping::Args),
+    /// Graphically display the response data from a .ping file
     View,
 }

@@ -165,7 +165,7 @@ fn path_from_range(mut range: IpRange<Ipv4Net>) -> Result<PathBuf, std::fmt::Err
         write!(name, "{}-{}_", net.network(), net.prefix_len())?;
     }
     name.pop();
-    write!(name, ".bin")?;
+    write!(name, ".ping")?;
     Ok(name.into())
 }
 
