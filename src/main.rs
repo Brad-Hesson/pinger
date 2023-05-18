@@ -4,6 +4,7 @@ mod ping;
 
 #[tokio::main]
 async fn main() {
+    console_subscriber::init();
     match Args::parse().subcommand {
         Subcommand::Ping(args) => ping::main(args).await,
         Subcommand::View => todo!(),

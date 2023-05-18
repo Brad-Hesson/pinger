@@ -20,13 +20,13 @@ use tokio::{
 const DATA_SIZE: u64 = std::mem::size_of::<f32>() as u64;
 
 pub async fn main(args: Args) {
-    console_subscriber::init();
-
+    // Construct the collection of subnets from the arguments struct
     let mut range = IpRange::<Ipv4Net>::new();
     for net_string in args.subnets {
         range.add(net_string.parse().unwrap());
     }
 
+    // Open (or create) the file that does/will contain the data
     let mut file = OpenOptions::new()
         .write(true)
         .create(true)
@@ -34,54 +34,90 @@ pub async fn main(args: Args) {
         .await
         .unwrap();
 
+    // Compute the number of completed pings in the file by dividing by the size of each entry. If an
+    // entry is only half written, we round down (using integer division) so that we overwrite it in
+    // this execution.
     let num_done = file.metadata().await.unwrap().len() / DATA_SIZE;
+
+    // Seek forward in the file to the entry after the last complete entry.  If the file was just
+    // created then this entry will just be the start of the file.
     file.seek(SeekFrom::Start(num_done * DATA_SIZE))
         .await
         .unwrap();
+
+    // Construct an iterator that will yield the remaining addresses to ping.
     let addrs = range
         .into_iter()
         .flat_map(|net| net.hosts())
         .skip(num_done as usize);
 
+    // Count the total number of addresses in the specified network range. Print the total number
+    // and remaining number of addresses to screen.
     let total_num_addrs = range.into_iter().flat_map(|net| net.hosts()).count();
     println!("{total_num_addrs} addresses to ping in total");
     println!("{num_done} addresses already in file");
 
+    // Construct the shared state struct and the pinger client struct.
     let state = Arc::new(State::new(total_num_addrs as u64, num_done));
     let client = Arc::new(surge_ping::Client::new(&surge_ping::Config::default()).unwrap());
 
+    // Construct the channel that will be used to send ping results to the file writer.
     let (tx, rx) = tokio::sync::mpsc::unbounded_channel::<JoinHandle<Option<Duration>>>();
 
+    // Spawn the file writer task, which is given the reciever end of the channel and the file handle
+    // wrapped in a BufWriter to speed up writes.
     let file_writer_handle = tokio::spawn(file_writer(rx, BufWriter::new(file)));
-    tokio::spawn(stats_printer(
+
+    // Spawn the stats printer task, which is given a reference to the shared state and the update
+    // interval from the command line args.
+    let stats_printer_handle = tokio::spawn(stats_printer(
         state.clone(),
         Duration::from_secs(args.update_interval),
     ));
+
+    // For every address in the iterator of remaining addresses:
     for addr in addrs {
+        // Construct a pinger
         let mut pinger = client.pinger(addr.into(), 0.into()).await;
+        // Set the timout based on the command line argument
         pinger.timeout(Duration::from_secs(args.timeout));
+        // Add 1 to the running count
         state.num_running.fetch_add(1, Ordering::Release);
-        let handle = tokio::spawn(worker(pinger, state.clone()));
+        // Spawn the worker
+        let handle = tokio::spawn(ping_worker(pinger, state.clone()));
+        // Send the worker handle to the file writer
         tx.send(handle).unwrap();
+        // wait until the running count drops below the max threshold given in the commmand line args
         while state.num_running.load(Ordering::Acquire) >= args.num_concurrent {
             tokio::task::yield_now().await;
         }
     }
+
+    // Now that all the pings have been sent, drop the channel sender in order to signal the file writer
+    // that no more handles will be added to the message queue and it can exit once it is done.
     drop(tx);
+
+    // Wait for the file writer and stats_printer to complete before exiting.
     file_writer_handle.await.unwrap();
-    tokio::time::sleep(Duration::from_secs(args.update_interval)).await;
+    stats_printer_handle.await.unwrap();
 }
 
 async fn file_writer(
     mut rx: UnboundedReceiver<JoinHandle<Option<Duration>>>,
     mut file: BufWriter<File>,
 ) {
+    // As long as there is another ping worker handle in the message queue:
+    // Wait for the ping to return, or timeout.
     while let Some(handle) = rx.recv().await {
-        match handle.await.unwrap() {
-            Some(dur) => file.write_f32(dur.as_secs_f32()).await.unwrap(),
-            None => file.write_f32(-1.).await.unwrap(),
-        }
+        // Get the duration of the ping, or use -1 for a timeout.
+        let num = match handle.await.unwrap() {
+            Some(dur) => dur.as_secs_f32(),
+            None => -1.,
+        };
+        // Write the number to the file in binary.
+        file.write_f32(num).await.unwrap();
     }
+    // Once completed, flush the buffer to the file.
     file.flush().await.unwrap();
 }
 
@@ -98,13 +134,19 @@ async fn stats_printer(state: Arc<State>, interval: Duration) {
         last_time = now;
         last_value = done;
         println!("{perc_done:>7.3}% done | {rate:>9.2} p/s | {active:>6} active",);
+        if done == state.total {
+            break;
+        }
     }
 }
 
-async fn worker(mut pinger: surge_ping::Pinger, state: Arc<State>) -> Option<Duration> {
+async fn ping_worker(mut pinger: surge_ping::Pinger, state: Arc<State>) -> Option<Duration> {
+    // Start the ping and await its return.
     let reply = pinger.ping(0.into(), &[]).await;
+    // Now the that the ping has returned, add one to num_done and subtract one from the running count
     state.num_done.fetch_add(1, Ordering::Release);
     state.num_running.fetch_sub(1, Ordering::Release);
+    // Return an optional duration based on if the ping timed out or returned successfully.
     reply.ok().map(|(_, dur)| dur)
 }
 
