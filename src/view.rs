@@ -2,24 +2,23 @@ use std::{
     fs::File,
     io::{BufReader, Read},
     net::Ipv4Addr,
-    path::PathBuf,
-    str::FromStr,
+    path::Path,
 };
 
 use ipnet::Ipv4Net;
 use iprange::IpRange;
-use itertools::izip;
-use piston_window::*;
+use itertools::{izip, Itertools};
+use piston_window::{math::identity, *};
 
 use self::pan_zoom::PanZoom;
 
 mod pan_zoom;
 
 pub async fn main(args: Args) {
-    let filepath = PathBuf::from_str(&args.filepath).unwrap();
-    let mut file = BufReader::new(File::open(&filepath).unwrap());
-    let range = range_from_path(filepath.file_stem().unwrap().to_str().unwrap());
+    let mut file = BufReader::new(File::open(&args.filepath).unwrap());
+    let range = range_from_path(args.filepath);
     let bools = read_file(&mut file);
+    let ping_map = PingMap::new(bools, range);
     let mut window: PistonWindow = WindowSettings::new("Pinger Viewer", [720, 480])
         .exit_on_esc(true)
         .build()
@@ -30,15 +29,57 @@ pub async fn main(args: Args) {
         window.draw_2d(&event, |mut ctx, g, _| {
             pan_zoom.apply_transform(&mut ctx);
             clear(color::GRAY, g);
-            let addrs = range.into_iter().flat_map(|net| net.hosts());
-            for (addr, b) in izip!(addrs, &bools) {
-                let [x, y] = hilbert_from_addr(addr);
-                let x = x as f64 / 65536. * 2. - 1.;
-                let y = y as f64 / 65536. * 2. - 1.;
-                let color = if *b {color::WHITE} else {color::BLACK};
-                center_rect(color, [x, y], [2. / 65536.; 2], ctx.transform, g);
-            }
+            ping_map.draw(ctx.transform, g);
         });
+    }
+}
+
+struct PingMap {
+    blacks: Vec<[f32; 2]>,
+    whites: Vec<[f32; 2]>,
+}
+impl PingMap {
+    fn new(bools: Vec<bool>, range: IpRange<Ipv4Net>) -> Self {
+        let iterator = range
+            .iter()
+            .flat_map(|net| net.hosts())
+            .map(hilbert_from_addr)
+            .map(|[x, y]| [x as f64 / 65536. * 2. - 1., y as f64 / 65536. * 2. - 1.])
+            .zip(bools);
+        let mut whites = vec![];
+        let mut blacks = vec![];
+        for ([x, y], b) in iterator {
+            let ps = triangulation::rect_tri_list_xy(identity(), [x, y, 2. / 65536., 2. / 65536.]);
+            if b {
+                whites.extend(ps);
+            } else {
+                blacks.extend(ps);
+            }
+        }
+        dbg!(blacks.len());
+        dbg!(whites.len());
+        Self { blacks, whites }
+    }
+    fn draw<G: Graphics>(&self, transform: math::Matrix2d, g: &mut G) {
+        let f = |send: &mut dyn FnMut(&[[f32; 2]])| {
+            use triangulation::{tx, ty};
+            for ps in self
+                .whites
+                .iter()
+                .map(|[x, y]| {
+                    [
+                        tx(transform, *x as f64, *y as f64),
+                        ty(transform, *x as f64, *y as f64),
+                    ]
+                })
+                .chunks(1023)
+                .into_iter()
+            {
+                let ps = ps.collect_vec();
+                send(&ps[..]);
+            }
+        };
+        g.tri_list(&DrawState::default(), &color::WHITE, f);
     }
 }
 
@@ -66,7 +107,8 @@ fn hilbert_from_addr(addr: Ipv4Addr) -> [u32; 2] {
     [x_pos, y_pos]
 }
 
-fn range_from_path(filename: &str) -> IpRange<Ipv4Net> {
+fn range_from_path(path: impl AsRef<Path>) -> IpRange<Ipv4Net> {
+    let filename = path.as_ref().file_stem().unwrap().to_str().unwrap();
     let mut range = IpRange::<Ipv4Net>::new();
     for s in filename.split('_') {
         let s = s.replace('-', "/").parse().unwrap();
