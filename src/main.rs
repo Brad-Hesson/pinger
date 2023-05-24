@@ -1,13 +1,14 @@
 use clap::Parser;
 
 mod ping;
+mod view;
 
 #[tokio::main]
 async fn main() {
     console_subscriber::init();
     match Args::parse().subcommand {
         Subcommand::Ping(args) => ping::main(args).await,
-        Subcommand::View => todo!(),
+        Subcommand::View(args) => view::main(args).await,
     }
 }
 #[derive(Parser, Debug)]
@@ -21,5 +22,5 @@ enum Subcommand {
     /// Ping a provided range of addresses and save the response durations to a file
     Ping(ping::Args),
     /// Graphically display the response data from a .ping file
-    View,
+    View(view::Args),
 }
