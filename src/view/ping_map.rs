@@ -12,8 +12,8 @@ use piston_window::{
 
 pub struct PingMap {
     white_vertices: Vec<[f32; 2]>,
-    white_t_buffer: Vec<[f32; 2]>,
-    white_slice_indices: Vec<usize>,
+    white_buffer: Vec<[f32; 2]>,
+    white_indices: Vec<usize>,
 }
 impl PingMap {
     pub fn new(bools: Vec<bool>, range: IpRange<Ipv4Net>) -> Self {
@@ -34,27 +34,30 @@ impl PingMap {
             .flat_map(|v| rect_tri_list_xy(identity(), v))
             .collect::<Vec<_>>();
         dbg!(white_vertices.len());
-        let white_slice_indices = (0..)
+        let white_indices = (0..)
             .map(|v| v * 1023)
             .take_while(|v| *v < white_vertices.len())
             .chain(Some(white_vertices.len()))
             .collect::<Vec<_>>();
         Self {
-            white_t_buffer: vec![[0., 0.]; white_vertices.len()],
+            white_buffer: vec![[0., 0.]; white_vertices.len()],
             white_vertices,
-            white_slice_indices,
+            white_indices,
         }
     }
     pub fn draw<G: Graphics>(&mut self, transform: math::Matrix2d, g: &mut G) {
+        // Load the buffer with the tranformed vertices
         for (i, [x, y]) in self.white_vertices.iter().enumerate() {
-            self.white_t_buffer[i] = [
+            self.white_buffer[i] = [
                 tx(transform, *x as f64, *y as f64),
                 ty(transform, *x as f64, *y as f64),
             ];
         }
+        // In the draw closure, simply iterate through the chuncks
+        // and send them to the gpu
         let f = |send: &mut dyn FnMut(&[[f32; 2]])| {
-            for (a, b) in self.white_slice_indices.iter().tuple_windows() {
-                send(&self.white_t_buffer[*a..*b]);
+            for (a, b) in self.white_indices.iter().tuple_windows() {
+                send(&self.white_buffer[*a..*b]);
             }
         };
         g.tri_list(&DrawState::default(), &color::WHITE, f);
