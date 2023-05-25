@@ -33,6 +33,12 @@ pub async fn main(args: Args) {
         window.draw_2d(&event, |mut ctx, g, _| {
             pan_zoom.apply_transform(&mut ctx);
             clear(color::GRAY, g);
+            rectangle(
+                color::BLACK,
+                [-1., -1., 2. + 2. / 65536., 2. + 2. / 65536.],
+                ctx.transform,
+                g,
+            );
             ping_map.draw(ctx.transform, g);
         });
     }
