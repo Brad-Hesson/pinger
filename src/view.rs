@@ -7,8 +7,12 @@ use std::{
 
 use ipnet::Ipv4Net;
 use iprange::IpRange;
-use itertools::{izip, Itertools};
-use piston_window::{math::identity, *};
+use itertools::Itertools;
+use piston_window::{
+    math::identity,
+    triangulation::{rect_tri_list_xy, tx, ty},
+    *,
+};
 
 use self::pan_zoom::PanZoom;
 
@@ -18,7 +22,7 @@ pub async fn main(args: Args) {
     let mut file = BufReader::new(File::open(&args.filepath).unwrap());
     let range = range_from_path(args.filepath);
     let bools = read_file(&mut file);
-    let ping_map = PingMap::new(bools, range);
+    let mut ping_map = PingMap::new(bools, range);
     let mut window: PistonWindow = WindowSettings::new("Pinger Viewer", [720, 480])
         .exit_on_esc(true)
         .build()
@@ -35,48 +39,50 @@ pub async fn main(args: Args) {
 }
 
 struct PingMap {
-    blacks: Vec<[f32; 2]>,
-    whites: Vec<[f32; 2]>,
+    white_vertices: Vec<[f32; 2]>,
+    white_t_buffer: Vec<[f32; 2]>,
+    white_slice_indices: Vec<usize>,
 }
 impl PingMap {
     fn new(bools: Vec<bool>, range: IpRange<Ipv4Net>) -> Self {
-        let iterator = range
+        let white_vertices = range
             .iter()
             .flat_map(|net| net.hosts())
             .map(hilbert_from_addr)
-            .map(|[x, y]| [x as f64 / 65536. * 2. - 1., y as f64 / 65536. * 2. - 1.])
-            .zip(bools);
-        let mut whites = vec![];
-        let mut blacks = vec![];
-        for ([x, y], b) in iterator {
-            let ps = triangulation::rect_tri_list_xy(identity(), [x, y, 2. / 65536., 2. / 65536.]);
-            if b {
-                whites.extend(ps);
-            } else {
-                blacks.extend(ps);
-            }
+            .map(|[x, y]| {
+                [
+                    x as f64 / 65536. * 2. - 1.,
+                    1. - y as f64 / 65536. * 2.,
+                    2. / 65536.,
+                    2. / 65536.,
+                ]
+            })
+            .zip(bools)
+            .filter_map(|(v, b)| b.then_some(v))
+            .flat_map(|v| rect_tri_list_xy(identity(), v))
+            .collect::<Vec<_>>();
+        dbg!(white_vertices.len());
+        let white_slice_indices = (0..)
+            .map(|v| v * 1023)
+            .take_while(|v| *v < white_vertices.len())
+            .chain(Some(white_vertices.len()))
+            .collect::<Vec<_>>();
+        Self {
+            white_t_buffer: vec![[0., 0.]; white_vertices.len()],
+            white_vertices,
+            white_slice_indices,
         }
-        dbg!(blacks.len());
-        dbg!(whites.len());
-        Self { blacks, whites }
     }
-    fn draw<G: Graphics>(&self, transform: math::Matrix2d, g: &mut G) {
+    fn draw<G: Graphics>(&mut self, transform: math::Matrix2d, g: &mut G) {
+        for (i, [x, y]) in self.white_vertices.iter().enumerate() {
+            self.white_t_buffer[i] = [
+                tx(transform, *x as f64, *y as f64),
+                ty(transform, *x as f64, *y as f64),
+            ];
+        }
         let f = |send: &mut dyn FnMut(&[[f32; 2]])| {
-            use triangulation::{tx, ty};
-            for ps in self
-                .whites
-                .iter()
-                .map(|[x, y]| {
-                    [
-                        tx(transform, *x as f64, *y as f64),
-                        ty(transform, *x as f64, *y as f64),
-                    ]
-                })
-                .chunks(1023)
-                .into_iter()
-            {
-                let ps = ps.collect_vec();
-                send(&ps[..]);
+            for (a, b) in self.white_slice_indices.iter().tuple_windows() {
+                send(&self.white_t_buffer[*a..*b]);
             }
         };
         g.tri_list(&DrawState::default(), &color::WHITE, f);
