@@ -6,6 +6,7 @@ edition = "2021"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
+bytemuck = { version = "1.13.1", features = ["derive"] }
 clap = { version = "4.2.7", features = ["derive"] }
 console-subscriber = "0.1.8"
 float-ord = "0.3.2"
@@ -15,3 +16,7 @@ itertools = "0.10.5"
 piston_window = "0.128.0"
 surge-ping = { path = "../surge-ping"}
 tokio = { version = "1.28.0", features = ["full"] }
+tracing = "0.1.37"
+tracing-subscriber = "0.3.17"
+wgpu = { version = "0.16.1", features = ["trace"] }
+winit = "0.28.6"
