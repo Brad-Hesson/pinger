@@ -66,7 +66,8 @@ pub async fn main(args: Args) {
 
     // Spawn the file writer task, which is given the reciever end of the channel and the file handle
     // wrapped in a BufWriter to speed up writes.
-    let file_writer_handle = tokio::spawn(file_writer(rx, BufWriter::new(file)));
+    let buf_writer = BufWriter::with_capacity(4 * 10, file);
+    let file_writer_handle = tokio::spawn(file_writer(rx, buf_writer));
 
     // Spawn the stats printer task, which is given a reference to the shared state and the update
     // interval from the cli arg.

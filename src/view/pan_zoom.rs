@@ -1,76 +1,120 @@
-use std::ops::RangeBounds;
+use wgpu::util::DeviceExt;
+use winit::event::{ElementState, Event, MouseButton, MouseScrollDelta, WindowEvent};
 
-use float_ord::FloatOrd;
-use piston_window::{
-    math, Button, ButtonArgs, ButtonState, Context, Event, Input, Motion, MouseButton, Transformed,
-};
+use super::renderer::DeviceState;
 
-#[derive(Debug)]
-pub struct PanZoom {
-    max_zoom: Option<f64>,
-    min_zoom: Option<f64>,
-    zoom_factor: f64,
-    zoom: f64,
-    pan: [f64; 2],
+pub struct PanZoomState {
+    pub uniform: PanZoomUniform,
+    pub buffer: wgpu::Buffer,
+    pub bind_group: wgpu::BindGroup,
+    pub bind_group_layout: wgpu::BindGroupLayout,
     mouse_down: bool,
+    last_position: Option<(f64, f64)>,
 }
-impl PanZoom {
-    pub fn new(zoom_factor: f64, limits: impl RangeBounds<f64>) -> Self {
-        let max_zoom = match limits.end_bound() {
-            std::ops::Bound::Included(v) => Some(*v),
-            std::ops::Bound::Excluded(v) => Some(*v),
-            std::ops::Bound::Unbounded => None,
-        };
-        let min_zoom = match limits.start_bound() {
-            std::ops::Bound::Included(v) => Some(*v),
-            std::ops::Bound::Excluded(v) => Some(*v),
-            std::ops::Bound::Unbounded => None,
-        };
+impl PanZoomState {
+    pub fn new(rend: &DeviceState) -> Self {
+        let pan_zoom_uniform = PanZoomUniform::default();
+        let pan_zoom_buffer = rend
+            .device
+            .create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                label: Some("Camera Buffer"),
+                contents: bytemuck::cast_slice(&[pan_zoom_uniform]),
+                usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+            });
+
+        let pan_zoom_bind_group_layout =
+            rend.device
+                .create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+                    entries: &[wgpu::BindGroupLayoutEntry {
+                        binding: 0,
+                        visibility: wgpu::ShaderStages::VERTEX,
+                        ty: wgpu::BindingType::Buffer {
+                            ty: wgpu::BufferBindingType::Uniform,
+                            has_dynamic_offset: false,
+                            min_binding_size: None,
+                        },
+                        count: None,
+                    }],
+                    label: Some("Pan Zoom Bind Group Layout"),
+                });
+
+        let pan_zoom_bind_group = rend.device.create_bind_group(&wgpu::BindGroupDescriptor {
+            layout: &pan_zoom_bind_group_layout,
+            entries: &[wgpu::BindGroupEntry {
+                binding: 0,
+                resource: pan_zoom_buffer.as_entire_binding(),
+            }],
+            label: Some("Pan Zoom Bind Group"),
+        });
         Self {
-            zoom_factor,
-            zoom: 1.,
-            pan: [0.; 2],
+            uniform: pan_zoom_uniform,
+            buffer: pan_zoom_buffer,
+            bind_group: pan_zoom_bind_group,
             mouse_down: false,
-            max_zoom,
-            min_zoom,
+            last_position: None,
+            bind_group_layout: pan_zoom_bind_group_layout,
         }
     }
-    pub fn update(&mut self, event: &Event) {
-        let input = match event {
-            Event::Input(input, _) => input,
-            _ => return,
+    pub fn update(&mut self, rend: &DeviceState, event: &Event<()>) {
+        let winit::event::Event::WindowEvent { event, .. } = event else {
+            return
         };
-        match input {
-            Input::Move(Motion::MouseScroll([_, scroll])) => {
-                self.zoom *= self.zoom_factor.powf(*scroll);
-                self.zoom = self.zoom.clamp(
-                    self.min_zoom.unwrap_or(f64::MIN_POSITIVE),
-                    self.max_zoom.unwrap_or(f64::MAX),
-                );
+        match event {
+            WindowEvent::CursorMoved { position, .. } => {
+                if let Some((last_x, last_y)) = self.last_position {
+                    if self.mouse_down {
+                        let dx = (position.x - last_x)
+                            / rend.size.width as f64
+                            / self.uniform.zoom[0] as f64
+                            * 2.;
+                        let dy = (position.y - last_y)
+                            / rend.size.height as f64
+                            / self.uniform.zoom[1] as f64
+                            * 2.;
+                        self.uniform.pan[0] += dx as f32;
+                        self.uniform.pan[1] -= dy as f32;
+                    }
+                }
+                self.last_position = Some((position.x, position.y))
             }
-            Input::Button(ButtonArgs {
-                state,
-                button: Button::Mouse(MouseButton::Left),
+            WindowEvent::MouseWheel {
+                delta: MouseScrollDelta::LineDelta(_, y),
                 ..
-            }) => self.mouse_down = *state == ButtonState::Press,
-            Input::Move(Motion::MouseRelative([dx, dy])) if self.mouse_down => {
-                self.pan[0] += dx / self.zoom;
-                self.pan[1] += dy / self.zoom;
+            } => {
+                self.uniform.zoom[0] *= 1.1f32.powf(*y);
+                self.uniform.zoom[1] *= 1.1f32.powf(*y);
             }
+            WindowEvent::MouseInput {
+                state: ElementState::Pressed,
+                button: MouseButton::Left,
+                ..
+            } => self.mouse_down = true,
+            WindowEvent::MouseInput {
+                state: ElementState::Released,
+                button: MouseButton::Left,
+                ..
+            } => self.mouse_down = false,
             _ => {}
         }
     }
-    pub fn apply_transform(&self, ctx: &mut Context) {
-        let screen_size = ctx.get_view_size();
-        let screen_offset = math::mul_scalar(screen_size, 0.5);
-        let screen_scale = screen_size
-            .into_iter()
-            .min_by_key(|f| FloatOrd(*f))
-            .unwrap()
-            / 2.;
-        *ctx = ctx.trans_pos(screen_offset);
-        *ctx = ctx.scale(self.zoom, self.zoom);
-        *ctx = ctx.trans_pos(self.pan);
-        *ctx = ctx.scale(screen_scale, screen_scale);
+    pub fn update_buffer(&self, renderer: &DeviceState) {
+        renderer
+            .queue
+            .write_buffer(&self.buffer, 0, bytemuck::cast_slice(&[self.uniform]));
+    }
+}
+
+#[repr(C)]
+#[derive(Copy, Clone, bytemuck::Pod, bytemuck::Zeroable)]
+pub struct PanZoomUniform {
+    pan: [f32; 2],
+    zoom: [f32; 2],
+}
+impl Default for PanZoomUniform {
+    fn default() -> Self {
+        Self {
+            pan: [0., 0.],
+            zoom: [1., 1.],
+        }
     }
 }

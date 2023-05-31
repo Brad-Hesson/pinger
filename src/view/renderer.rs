@@ -1,6 +1,6 @@
-use winit::window::Window;
+use winit::{event::Event, window::Window};
 
-pub struct Renderer {
+pub struct DeviceState {
     pub surface: wgpu::Surface,
     pub device: wgpu::Device,
     pub queue: wgpu::Queue,
@@ -9,7 +9,7 @@ pub struct Renderer {
     pub window: Window,
 }
 
-impl Renderer {
+impl DeviceState {
     pub async fn new(window: Window) -> Self {
         let size = window.inner_size();
 
@@ -76,6 +76,20 @@ impl Renderer {
             self.config.width = new_size.width;
             self.config.height = new_size.height;
             self.surface.configure(&self.device, &self.config);
+        }
+    }
+    pub fn update(&mut self, event: &Event<()>) {
+        use winit::event::WindowEvent::*;
+        match event {
+            Event::WindowEvent { ref event, .. } => match event {
+                ScaleFactorChanged { new_inner_size, .. } => self.resize(**new_inner_size),
+                Resized(physical_size) => self.resize(*physical_size),
+                _ => {}
+            },
+            Event::MainEventsCleared => {
+                self.window.request_redraw();
+            }
+            _ => {}
         }
     }
 }
