@@ -69,7 +69,7 @@ impl PingMapState {
 #[repr(C)]
 #[derive(Debug, Copy, Clone, bytemuck::Pod, bytemuck::Zeroable)]
 pub struct Instance {
-    hilb: u32,
+    pub hilb: u32,
 }
 impl Instance {
     pub fn desc() -> wgpu::VertexBufferLayout<'static> {

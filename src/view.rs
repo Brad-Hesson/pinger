@@ -6,7 +6,10 @@ use itertools::Itertools;
 use tokio::{
     fs::File,
     io::{self, AsyncReadExt, BufReader},
-    sync::mpsc::{UnboundedReceiver, UnboundedSender},
+    sync::{
+        mpsc::{UnboundedReceiver, UnboundedSender},
+        watch::{Receiver, Sender},
+    },
 };
 use tracing::Level;
 use winit::{
@@ -32,12 +35,13 @@ pub async fn main(args: Args) {
         .init();
 
     let (instance_tx, instance_rx) = tokio::sync::mpsc::unbounded_channel::<Instance>();
-    tokio::spawn(file_reader(args.filepath, instance_tx));
+    let (addr_tx, addr_rx) = tokio::sync::watch::channel(0u32);
+    tokio::spawn(file_reader(args.filepath, instance_tx, addr_tx));
 
     let event_loop = EventLoop::new();
     let window = WindowBuilder::new().build(&event_loop).unwrap();
 
-    let mut state = State::new(window, instance_rx).await;
+    let mut state = State::new(window, instance_rx, addr_rx).await;
 
     event_loop.run(move |event, _, control_flow| {
         use winit::event::{Event::*, WindowEvent::*};
@@ -61,16 +65,21 @@ pub async fn main(args: Args) {
     })
 }
 
-async fn file_reader(path: impl AsRef<Path>, tx: UnboundedSender<Instance>) {
+async fn file_reader(
+    path: impl AsRef<Path>,
+    instance_tx: UnboundedSender<Instance>,
+    addr_tx: Sender<u32>,
+) {
     let file = File::open(&path).await.unwrap();
     let mut buf_reader = BufReader::new(file);
     let nets = range_from_path(path).iter().collect_vec();
     let instances = nets.iter().flat_map(|net| net.hosts()).map(Instance::from);
     let poll_dur = Duration::from_millis(10);
     for instance in instances {
+        addr_tx.send(instance.hilb).unwrap();
         let val = read_f32_wait(&mut buf_reader, poll_dur).await.unwrap();
         if val >= 0. {
-            tx.send(instance).unwrap()
+            instance_tx.send(instance).unwrap()
         }
     }
 }
@@ -93,10 +102,14 @@ struct State {
     render_pipeline: wgpu::RenderPipeline,
 }
 impl State {
-    async fn new(window: Window, rx: UnboundedReceiver<Instance>) -> Self {
+    async fn new(
+        window: Window,
+        instance_rx: UnboundedReceiver<Instance>,
+        addr_rx: Receiver<u32>,
+    ) -> Self {
         let gpu = DeviceState::new(window).await;
-        let pan_zoom = PanZoomState::new(&gpu);
-        let ping_map = PingMapState::new(&gpu, rx);
+        let pan_zoom = PanZoomState::new(&gpu, addr_rx);
+        let ping_map = PingMapState::new(&gpu, instance_rx);
 
         let shader = gpu
             .device
@@ -221,6 +234,28 @@ fn range_from_path(path: impl AsRef<Path>) -> IpRange<Ipv4Net> {
     }
     range.simplify();
     range
+}
+
+fn hilbert_decode(mut d: u32, bits: u32) -> [u32; 2] {
+    let mut out = [0, 0];
+    for i in 1..bits {
+        let s = 2u32.pow(i);
+        let rx = 1 & (d / 2);
+        let ry = 1 & (d ^ rx);
+        if ry == 0 {
+            if rx == 1 {
+                out[0] = s - 1 - out[0];
+                out[1] = s - 1 - out[1];
+            }
+            let tmp = out[0];
+            out[0] = out[1];
+            out[1] = tmp;
+        }
+        out[0] += s * rx;
+        out[1] += s * ry;
+        d /= 4;
+    }
+    return out;
 }
 
 #[derive(Debug, clap::Args)]

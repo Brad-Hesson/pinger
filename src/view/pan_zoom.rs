@@ -1,8 +1,11 @@
+use tokio::sync::watch::Receiver;
 use wgpu::util::DeviceExt;
 use winit::{
     dpi::PhysicalSize,
     event::{ElementState, Event, MouseButton, MouseScrollDelta},
 };
+
+use crate::view::hilbert_decode;
 
 use super::renderer::DeviceState;
 
@@ -16,9 +19,11 @@ pub struct PanZoomState {
     mouse_down: bool,
     last_position: Option<(f64, f64)>,
     modified: bool,
+    addr_rx: Receiver<u32>,
+    follow_mode: bool,
 }
 impl PanZoomState {
-    pub fn new(rend: &DeviceState) -> Self {
+    pub fn new(rend: &DeviceState, addr_rx: Receiver<u32>) -> Self {
         let pan_zoom_uniform = PanZoomUniform::default();
         let pan_zoom_buffer = rend
             .device
@@ -63,6 +68,8 @@ impl PanZoomState {
             zoom: 1.,
             aspect,
             modified: true,
+            addr_rx,
+            follow_mode: false,
         }
     }
     fn update_aspect(&mut self, new_size: &PhysicalSize<u32>) {
@@ -77,12 +84,27 @@ impl PanZoomState {
         }
         self.modified = true;
     }
+    pub fn pan_to(&mut self, x: u32, y: u32) {
+        self.uniform.pan[0] = 1. - x as f32 / 2f32.powf(16.) * 2.;
+        self.uniform.pan[1] = 1. - y as f32 / 2f32.powf(16.) * 2.;
+    }
     pub fn update(&mut self, rend: &DeviceState, event: &Event<()>) {
+        if self.follow_mode && self.addr_rx.has_changed().unwrap() {
+            let addr = *self.addr_rx.borrow_and_update();
+            let [x, y] = hilbert_decode(addr, 32);
+            self.pan_to(x, y);
+            self.modified = true;
+        }
+        use winit::event::VirtualKeyCode::*;
         use winit::event::WindowEvent::*;
         let winit::event::Event::WindowEvent { event, .. } = event else {
             return
         };
         match event {
+            KeyboardInput { input, .. } if input.virtual_keycode == Some(Space) => {
+                self.follow_mode ^= input.state == ElementState::Pressed;
+                self.modified = true;
+            }
             ScaleFactorChanged { new_inner_size, .. } => self.update_aspect(new_inner_size),
             Resized(physical_size) => self.update_aspect(physical_size),
             CursorMoved { position, .. } => {
@@ -108,7 +130,7 @@ impl PanZoomState {
                 ..
             } => {
                 let t_zoom = self.zoom;
-                self.zoom = (t_zoom * 1.1f32.powf(*y)).max(1.);
+                self.zoom = (t_zoom * 1.1f32.powf(*y)).max(0.5); //.max(1.);
                 let factor = self.zoom / t_zoom;
                 self.update_scale();
                 if let Some((last_x, last_y)) = self.last_position {
