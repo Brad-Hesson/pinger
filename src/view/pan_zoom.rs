@@ -67,6 +67,14 @@ impl PanZoomState {
     }
     fn update_aspect(&mut self, new_size: &PhysicalSize<u32>) {
         self.aspect = new_size.height as f32 / new_size.width as f32;
+        self.update_scale();
+    }
+    fn update_scale(&mut self) {
+        if self.aspect >= 1. {
+            self.uniform.scale = [self.zoom, self.zoom / self.aspect];
+        } else {
+            self.uniform.scale = [self.zoom * self.aspect, self.zoom];
+        }
         self.modified = true;
     }
     pub fn update(&mut self, rend: &DeviceState, event: &Event<()>) {
@@ -99,8 +107,20 @@ impl PanZoomState {
                 delta: MouseScrollDelta::LineDelta(_, y),
                 ..
             } => {
-                self.zoom *= 1.1f32.powf(*y);
-                self.modified = true;
+                let t_zoom = self.zoom;
+                self.zoom = (t_zoom * 1.1f32.powf(*y)).max(1.);
+                let factor = self.zoom / t_zoom;
+                self.update_scale();
+                if let Some((last_x, last_y)) = self.last_position {
+                    let dx = (last_x / rend.size.width as f64 * 2. - 1.)
+                        / self.uniform.scale[0] as f64
+                        * (factor - 1.) as f64;
+                    self.uniform.pan[0] -= dx as f32;
+                    let dx = (last_y / rend.size.height as f64 * 2. - 1.)
+                        / self.uniform.scale[1] as f64
+                        * (factor - 1.) as f64;
+                    self.uniform.pan[1] += dx as f32;
+                }
             }
             MouseInput {
                 state: ElementState::Pressed,
@@ -119,15 +139,10 @@ impl PanZoomState {
         if !self.modified {
             return;
         }
-        if self.aspect >= 1. {
-            self.uniform.scale = [self.zoom, self.zoom / self.aspect];
-        } else {
-            self.uniform.scale = [self.zoom * self.aspect, self.zoom];
-        }
+        self.modified = false;
         renderer
             .queue
             .write_buffer(&self.buffer, 0, bytemuck::cast_slice(&[self.uniform]));
-        self.modified = false;
     }
 }
 
