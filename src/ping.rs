@@ -66,7 +66,7 @@ pub async fn main(args: Args) {
 
     // Spawn the file writer task, which is given the reciever end of the channel and the file handle
     // wrapped in a BufWriter to speed up writes.
-    let buf_writer = BufWriter::with_capacity(4 * 10, file);
+    let buf_writer = BufWriter::with_capacity(4 * 100, file);
     let file_writer_handle = tokio::spawn(file_writer(rx, buf_writer));
 
     // Spawn the stats printer task, which is given a reference to the shared state and the update
@@ -151,7 +151,14 @@ async fn stats_printer(state: Arc<State>, interval: Duration) {
 
 async fn ping_worker(mut pinger: surge_ping::Pinger, state: Arc<State>) -> Option<Duration> {
     // Start the ping and await its return.
-    let reply = pinger.ping(0.into(), &[]).await;
+    let mut i = 0;
+    let reply = loop {
+        let reply = pinger.ping(0.into(), &[]).await;
+        if i > 5 || reply.is_ok() {
+            break reply;
+        }
+        i += 1;
+    };
     // Now that the ping has returned, add 1 to num_done and subtract 1 from the running count
     state.num_done.fetch_add(1, Ordering::Release);
     state.num_running.fetch_sub(1, Ordering::Release);

@@ -63,7 +63,7 @@ pub async fn main(args: Args) {
 
 async fn file_reader(path: impl AsRef<Path>, tx: UnboundedSender<Instance>) {
     let file = File::open(&path).await.unwrap();
-    let mut buf_reader = BufReader::with_capacity(4 * 1000, file);
+    let mut buf_reader = BufReader::new(file);
     let nets = range_from_path(path).iter().collect_vec();
     let instances = nets.iter().flat_map(|net| net.hosts()).map(Instance::from);
     let poll_dur = Duration::from_millis(10);
