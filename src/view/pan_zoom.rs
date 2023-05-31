@@ -1,15 +1,21 @@
 use wgpu::util::DeviceExt;
-use winit::event::{ElementState, Event, MouseButton, MouseScrollDelta, WindowEvent};
+use winit::{
+    dpi::PhysicalSize,
+    event::{ElementState, Event, MouseButton, MouseScrollDelta},
+};
 
 use super::renderer::DeviceState;
 
 pub struct PanZoomState {
     pub uniform: PanZoomUniform,
+    zoom: f32,
+    aspect: f32,
     pub buffer: wgpu::Buffer,
     pub bind_group: wgpu::BindGroup,
     pub bind_group_layout: wgpu::BindGroupLayout,
     mouse_down: bool,
     last_position: Option<(f64, f64)>,
+    modified: bool,
 }
 impl PanZoomState {
     pub fn new(rend: &DeviceState) -> Self {
@@ -46,6 +52,7 @@ impl PanZoomState {
             }],
             label: Some("Pan Zoom Bind Group"),
         });
+        let aspect = rend.size.height as f32 / rend.size.width as f32;
         Self {
             uniform: pan_zoom_uniform,
             buffer: pan_zoom_buffer,
@@ -53,43 +60,54 @@ impl PanZoomState {
             mouse_down: false,
             last_position: None,
             bind_group_layout: pan_zoom_bind_group_layout,
+            zoom: 1.,
+            aspect,
+            modified: true,
         }
     }
+    fn update_aspect(&mut self, new_size: &PhysicalSize<u32>) {
+        self.aspect = new_size.height as f32 / new_size.width as f32;
+        self.modified = true;
+    }
     pub fn update(&mut self, rend: &DeviceState, event: &Event<()>) {
+        use winit::event::WindowEvent::*;
         let winit::event::Event::WindowEvent { event, .. } = event else {
             return
         };
         match event {
-            WindowEvent::CursorMoved { position, .. } => {
+            ScaleFactorChanged { new_inner_size, .. } => self.update_aspect(new_inner_size),
+            Resized(physical_size) => self.update_aspect(physical_size),
+            CursorMoved { position, .. } => {
                 if let Some((last_x, last_y)) = self.last_position {
                     if self.mouse_down {
                         let dx = (position.x - last_x)
                             / rend.size.width as f64
-                            / self.uniform.zoom[0] as f64
+                            / self.uniform.scale[0] as f64
                             * 2.;
                         let dy = (position.y - last_y)
                             / rend.size.height as f64
-                            / self.uniform.zoom[1] as f64
+                            / self.uniform.scale[1] as f64
                             * 2.;
                         self.uniform.pan[0] += dx as f32;
                         self.uniform.pan[1] -= dy as f32;
+                        self.modified = true;
                     }
                 }
                 self.last_position = Some((position.x, position.y))
             }
-            WindowEvent::MouseWheel {
+            MouseWheel {
                 delta: MouseScrollDelta::LineDelta(_, y),
                 ..
             } => {
-                self.uniform.zoom[0] *= 1.1f32.powf(*y);
-                self.uniform.zoom[1] *= 1.1f32.powf(*y);
+                self.zoom *= 1.1f32.powf(*y);
+                self.modified = true;
             }
-            WindowEvent::MouseInput {
+            MouseInput {
                 state: ElementState::Pressed,
                 button: MouseButton::Left,
                 ..
             } => self.mouse_down = true,
-            WindowEvent::MouseInput {
+            MouseInput {
                 state: ElementState::Released,
                 button: MouseButton::Left,
                 ..
@@ -97,10 +115,19 @@ impl PanZoomState {
             _ => {}
         }
     }
-    pub fn update_buffer(&self, renderer: &DeviceState) {
+    pub fn update_buffer(&mut self, renderer: &DeviceState) {
+        if !self.modified {
+            return;
+        }
+        if self.aspect >= 1. {
+            self.uniform.scale = [self.zoom, self.zoom / self.aspect];
+        } else {
+            self.uniform.scale = [self.zoom * self.aspect, self.zoom];
+        }
         renderer
             .queue
             .write_buffer(&self.buffer, 0, bytemuck::cast_slice(&[self.uniform]));
+        self.modified = false;
     }
 }
 
@@ -108,13 +135,13 @@ impl PanZoomState {
 #[derive(Copy, Clone, bytemuck::Pod, bytemuck::Zeroable)]
 pub struct PanZoomUniform {
     pan: [f32; 2],
-    zoom: [f32; 2],
+    scale: [f32; 2],
 }
 impl Default for PanZoomUniform {
     fn default() -> Self {
         Self {
             pan: [0., 0.],
-            zoom: [1., 1.],
+            scale: [1., 1.],
         }
     }
 }
