@@ -103,13 +103,18 @@ impl PanZoomState {
         match event {
             KeyboardInput { input, .. } if input.virtual_keycode == Some(Space) => {
                 self.follow_mode ^= input.state == ElementState::Pressed;
-                self.modified = true;
+                if self.follow_mode {
+                    let addr = *self.addr_rx.borrow_and_update();
+                    let [x, y] = hilbert_decode(addr, 32);
+                    self.pan_to(x, y);
+                    self.modified = true;
+                }
             }
             ScaleFactorChanged { new_inner_size, .. } => self.update_aspect(new_inner_size),
             Resized(physical_size) => self.update_aspect(physical_size),
             CursorMoved { position, .. } => {
                 if let Some((last_x, last_y)) = self.last_position {
-                    if self.mouse_down {
+                    if self.mouse_down && !self.follow_mode {
                         let dx = (position.x - last_x)
                             / rend.size.width as f64
                             / self.uniform.scale[0] as f64
@@ -130,7 +135,7 @@ impl PanZoomState {
                 ..
             } => {
                 let t_zoom = self.zoom;
-                self.zoom = (t_zoom * 1.1f32.powf(*y)).max(0.5); //.max(1.);
+                self.zoom = (t_zoom * 1.1f32.powf(*y)).max(1.);
                 let factor = self.zoom / t_zoom;
                 self.update_scale();
                 if let Some((last_x, last_y)) = self.last_position {

@@ -238,7 +238,7 @@ fn range_from_path(path: impl AsRef<Path>) -> IpRange<Ipv4Net> {
 
 fn hilbert_decode(mut d: u32, bits: u32) -> [u32; 2] {
     let mut out = [0, 0];
-    for i in 1..bits {
+    for i in 0..bits {
         let s = 2u32.pow(i);
         let rx = 1 & (d / 2);
         let ry = 1 & (d ^ rx);
