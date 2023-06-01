@@ -70,13 +70,15 @@ impl PingMapState {
 #[derive(Debug, Copy, Clone, bytemuck::Pod, bytemuck::Zeroable)]
 pub struct Instance {
     pub hilb: u32,
+    pub color: u32,
 }
 impl Instance {
+    const ATTRS: [VertexAttribute; 2] = wgpu::vertex_attr_array![2 => Uint32, 3 => Uint32];
     pub fn desc() -> wgpu::VertexBufferLayout<'static> {
         wgpu::VertexBufferLayout {
             array_stride: std::mem::size_of::<Self>() as wgpu::BufferAddress,
             step_mode: wgpu::VertexStepMode::Instance,
-            attributes: &wgpu::vertex_attr_array![2 => Uint32],
+            attributes: &Self::ATTRS,
         }
     }
 }
@@ -84,6 +86,7 @@ impl From<Ipv4Addr> for Instance {
     fn from(addr: Ipv4Addr) -> Self {
         Self {
             hilb: u32::from_be_bytes(addr.octets()),
+            color: u32::from_be_bytes([100, 100, 100, 100]),
         }
     }
 }

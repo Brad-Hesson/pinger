@@ -75,10 +75,12 @@ async fn file_reader(
     let nets = range_from_path(path).iter().collect_vec();
     let instances = nets.iter().flat_map(|net| net.hosts()).map(Instance::from);
     let poll_dur = Duration::from_millis(10);
-    for instance in instances {
+    for mut instance in instances {
         addr_tx.send(instance.hilb).unwrap();
         let val = read_f32_wait(&mut buf_reader, poll_dur).await.unwrap();
         if val >= 0. {
+            let color = 255 - (val / 2. * 255.).clamp(0., 255.) as u8;
+            instance.color = u32::from_be_bytes([color, color, color, 255]);
             instance_tx.send(instance).unwrap()
         }
     }

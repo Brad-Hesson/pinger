@@ -5,9 +5,14 @@ struct VertexInput {
     @location(1) uv: vec2<f32>,
 }
 
+struct InstanceInput {
+    @location(2) hilbert: u32,
+    @location(3) color: u32
+}
+
 struct VertexOutput {
     @builtin(position) clip_position: vec4<f32>,
-    @location(1) uv: vec2<f32>
+    @location(1) color: vec4<f32>
 };
 
 struct PanZoomUniform {
@@ -20,16 +25,16 @@ var<uniform> pan_zoom: PanZoomUniform;
 @vertex
 fn vs_main(
     vertex: VertexInput,
-    @location(2) instance: u32
+    instance: InstanceInput
 ) -> VertexOutput {
-    var coords = vec2<f32>(hilbert_decode(instance, N));
+    var coords = vec2<f32>(hilbert_decode(instance.hilbert, N));
     coords = coords / f32(1u << 16u) * 2. - 1.;
     var pos = vertex.position.xy;
     pos = pos / f32(1u << 16u) + coords;
     pos += pan_zoom.pan;
     pos *= pan_zoom.zoom;
     var out: VertexOutput;
-    out.uv = vertex.uv;
+    out.color = color_from_u32(instance.color);
     out.clip_position = vec4<f32>(pos, 1., 1.0);
     return out;
 }
@@ -40,13 +45,7 @@ const N: u32 = 16u;
 
 @fragment
 fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
-    let side_length = f32(1u << N);
-    var x = u32(in.uv.x * side_length);
-    var y = u32(in.uv.y * side_length);
-    let hilb = hilbert_encode(x, y, N);
-    let color = 1.;
-    // let color = f32_norm(hilb);
-    return vec4<f32>(color, color, color, 1.0);
+    return in.color;
 }
 
 fn f32_norm(v: u32) -> f32 {
@@ -96,4 +95,13 @@ fn hilbert_decode(d: u32, bits: u32) -> vec2<u32> {
         d /= 4u;
     }
     return out;
+}
+
+fn color_from_u32(color: u32) -> vec4<f32> {
+    return vec4<f32>(
+        f32((color >> 24u) & 0xFFu) / 255.,
+        f32((color >> 16u) & 0xFFu) / 255.,
+        f32((color >> 8u) & 0xFFu) / 255.,
+        f32((color >> 0u) & 0xFFu) / 255.,
+    );
 }

@@ -89,7 +89,7 @@ impl PanZoomState {
         self.uniform.pan[1] = 1. - y as f32 / 2f32.powf(16.) * 2.;
     }
     pub fn update(&mut self, rend: &DeviceState, event: &Event<()>) {
-        if self.follow_mode && self.addr_rx.has_changed().unwrap() {
+        if self.follow_mode && self.addr_rx.has_changed().unwrap_or(false) {
             let addr = *self.addr_rx.borrow_and_update();
             let [x, y] = hilbert_decode(addr, 32);
             self.pan_to(x, y);
@@ -139,14 +139,16 @@ impl PanZoomState {
                 let factor = self.zoom / t_zoom;
                 self.update_scale();
                 if let Some((last_x, last_y)) = self.last_position {
-                    let dx = (last_x / rend.size.width as f64 * 2. - 1.)
-                        / self.uniform.scale[0] as f64
-                        * (factor - 1.) as f64;
-                    self.uniform.pan[0] -= dx as f32;
-                    let dx = (last_y / rend.size.height as f64 * 2. - 1.)
-                        / self.uniform.scale[1] as f64
-                        * (factor - 1.) as f64;
-                    self.uniform.pan[1] += dx as f32;
+                    if !self.follow_mode {
+                        let dx = (last_x / rend.size.width as f64 * 2. - 1.)
+                            / self.uniform.scale[0] as f64
+                            * (factor - 1.) as f64;
+                        self.uniform.pan[0] -= dx as f32;
+                        let dx = (last_y / rend.size.height as f64 * 2. - 1.)
+                            / self.uniform.scale[1] as f64
+                            * (factor - 1.) as f64;
+                        self.uniform.pan[1] += dx as f32;
+                    }
                 }
             }
             MouseInput {
