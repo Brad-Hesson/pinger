@@ -12,6 +12,7 @@ use tokio::{
     },
 };
 use tracing::Level;
+use wgpu::*;
 use winit::{
     event::Event,
     event_loop::{ControlFlow, EventLoop},
@@ -55,8 +56,8 @@ pub async fn main(args: Args) {
                 let result = state.render();
                 match result {
                     Ok(_) => {}
-                    Err(wgpu::SurfaceError::Lost) => state.gpu.resize(state.gpu.size),
-                    Err(wgpu::SurfaceError::OutOfMemory) => *control_flow = ControlFlow::Exit,
+                    Err(SurfaceError::Lost) => state.gpu.resize(state.gpu.size),
+                    Err(SurfaceError::OutOfMemory) => *control_flow = ControlFlow::Exit,
                     Err(e) => tracing::warn!("{e:?}"),
                 }
             }
@@ -79,8 +80,8 @@ async fn file_reader(
         addr_tx.send(instance.hilb).unwrap();
         let val = read_f32_wait(&mut buf_reader, poll_dur).await.unwrap();
         if val >= 0. {
-            let color = 255 - (val / 2. * 255.).clamp(0., 255.) as u8;
-            instance.color = u32::from_be_bytes([color, color, color, 255]);
+            let color = (val / 0.5 * 255.).clamp(0., 255.) as u8;
+            instance.color = u32::from_be_bytes([color, 255 - color, 255 - color, 255]);
             instance_tx.send(instance).unwrap()
         }
     }
@@ -101,7 +102,7 @@ struct State {
     gpu: DeviceState,
     pan_zoom: PanZoomState,
     ping_map: PingMapState,
-    render_pipeline: wgpu::RenderPipeline,
+    render_pipeline: RenderPipeline,
 }
 impl State {
     async fn new(
@@ -115,44 +116,44 @@ impl State {
 
         let shader = gpu
             .device
-            .create_shader_module(wgpu::include_wgsl!("view/shader.wgsl"));
-        let render_pipeline_layout =
-            gpu.device
-                .create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
-                    label: Some("Render Pipeline Layout"),
-                    bind_group_layouts: &[&pan_zoom.bind_group_layout],
-                    push_constant_ranges: &[],
-                });
+            .create_shader_module(include_wgsl!("view/shader.wgsl"));
+        let render_pipeline_layout = gpu
+            .device
+            .create_pipeline_layout(&PipelineLayoutDescriptor {
+                label: Some("Render Pipeline Layout"),
+                bind_group_layouts: &[&pan_zoom.bind_group_layout],
+                push_constant_ranges: &[],
+            });
         let render_pipeline = gpu
             .device
-            .create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+            .create_render_pipeline(&RenderPipelineDescriptor {
                 label: Some("Render Pipeline"),
                 layout: Some(&render_pipeline_layout),
-                vertex: wgpu::VertexState {
+                vertex: VertexState {
                     module: &shader,
                     entry_point: "vs_main",
                     buffers: &[Vertex::desc(), Instance::desc()],
                 },
-                fragment: Some(wgpu::FragmentState {
+                fragment: Some(FragmentState {
                     module: &shader,
                     entry_point: "fs_main",
-                    targets: &[Some(wgpu::ColorTargetState {
+                    targets: &[Some(ColorTargetState {
                         format: gpu.config.format,
-                        blend: Some(wgpu::BlendState::REPLACE),
-                        write_mask: wgpu::ColorWrites::ALL,
+                        blend: Some(BlendState::REPLACE),
+                        write_mask: ColorWrites::ALL,
                     })],
                 }),
-                primitive: wgpu::PrimitiveState {
-                    topology: wgpu::PrimitiveTopology::TriangleList,
+                primitive: PrimitiveState {
+                    topology: PrimitiveTopology::TriangleList,
                     strip_index_format: None,
-                    front_face: wgpu::FrontFace::Ccw,
+                    front_face: FrontFace::Ccw,
                     cull_mode: None,
                     unclipped_depth: false,
-                    polygon_mode: wgpu::PolygonMode::Fill,
+                    polygon_mode: PolygonMode::Fill,
                     conservative: false,
                 },
                 depth_stencil: None,
-                multisample: wgpu::MultisampleState {
+                multisample: MultisampleState {
                     count: 1,
                     mask: !0,
                     alpha_to_coverage_enabled: false,
@@ -167,31 +168,31 @@ impl State {
             render_pipeline,
         }
     }
-    fn render(&mut self) -> Result<(), wgpu::SurfaceError> {
+    fn render(&mut self) -> Result<(), SurfaceError> {
         self.pan_zoom.update_buffer(&self.gpu);
         self.ping_map.update_buffer(&self.gpu);
 
         let output = self.gpu.surface.get_current_texture()?;
         let view = output
             .texture
-            .create_view(&wgpu::TextureViewDescriptor::default());
+            .create_view(&TextureViewDescriptor::default());
 
         let mut encoder = self
             .gpu
             .device
-            .create_command_encoder(&wgpu::CommandEncoderDescriptor {
+            .create_command_encoder(&CommandEncoderDescriptor {
                 label: Some("Render Encoder"),
             });
 
         {
-            let mut render_pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+            let mut render_pass = encoder.begin_render_pass(&RenderPassDescriptor {
                 label: Some("Render Pass"),
                 depth_stencil_attachment: None,
-                color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                color_attachments: &[Some(RenderPassColorAttachment {
                     view: &view,
                     resolve_target: None,
-                    ops: wgpu::Operations {
-                        load: wgpu::LoadOp::Clear(wgpu::Color {
+                    ops: Operations {
+                        load: LoadOp::Clear(Color {
                             r: 0.0,
                             g: 0.0,
                             b: 0.0,
@@ -205,10 +206,7 @@ impl State {
             render_pass.set_bind_group(0, &self.pan_zoom.bind_group, &[]);
             render_pass.set_vertex_buffer(0, self.ping_map.vertex_buffer.slice(..));
             render_pass.set_vertex_buffer(1, self.ping_map.instance_buffer.slice(..));
-            render_pass.set_index_buffer(
-                self.ping_map.index_buffer.slice(..),
-                wgpu::IndexFormat::Uint16,
-            );
+            render_pass.set_index_buffer(self.ping_map.index_buffer.slice(..), IndexFormat::Uint16);
             render_pass.draw_indexed(
                 0..self.ping_map.indicies.len() as _,
                 0,

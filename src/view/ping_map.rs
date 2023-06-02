@@ -1,41 +1,35 @@
 use std::net::Ipv4Addr;
 
 use tokio::sync::mpsc::UnboundedReceiver;
-use wgpu::{util::DeviceExt, VertexAttribute};
+use wgpu::{util::*, *};
 
 use super::renderer::DeviceState;
 
 pub struct PingMapState {
     pub instances: Vec<Instance>,
     pub indicies: Vec<u16>,
-    pub instance_buffer: wgpu::Buffer,
-    pub vertex_buffer: wgpu::Buffer,
-    pub index_buffer: wgpu::Buffer,
+    pub instance_buffer: Buffer,
+    pub vertex_buffer: Buffer,
+    pub index_buffer: Buffer,
     pub rx: UnboundedReceiver<Instance>,
 }
 impl PingMapState {
     pub fn new(gpu: &DeviceState, rx: UnboundedReceiver<Instance>) -> Self {
-        let instance_buffer = gpu
-            .device
-            .create_buffer_init(&wgpu::util::BufferInitDescriptor {
-                label: Some("Instance Buffer"),
-                contents: &[],
-                usage: wgpu::BufferUsages::VERTEX,
-            });
-        let vertex_buffer = gpu
-            .device
-            .create_buffer_init(&wgpu::util::BufferInitDescriptor {
-                label: Some("Vertex Buffer"),
-                contents: bytemuck::cast_slice(VERTICES),
-                usage: wgpu::BufferUsages::VERTEX,
-            });
-        let index_buffer = gpu
-            .device
-            .create_buffer_init(&wgpu::util::BufferInitDescriptor {
-                label: Some("Index Buffer"),
-                contents: bytemuck::cast_slice(INDICES),
-                usage: wgpu::BufferUsages::INDEX,
-            });
+        let instance_buffer = gpu.device.create_buffer_init(&BufferInitDescriptor {
+            label: Some("Instance Buffer"),
+            contents: &[],
+            usage: BufferUsages::VERTEX,
+        });
+        let vertex_buffer = gpu.device.create_buffer_init(&BufferInitDescriptor {
+            label: Some("Vertex Buffer"),
+            contents: bytemuck::cast_slice(VERTICES),
+            usage: BufferUsages::VERTEX,
+        });
+        let index_buffer = gpu.device.create_buffer_init(&BufferInitDescriptor {
+            label: Some("Index Buffer"),
+            contents: bytemuck::cast_slice(INDICES),
+            usage: BufferUsages::INDEX,
+        });
 
         Self {
             indicies: INDICES.into(),
@@ -53,13 +47,11 @@ impl PingMapState {
             updated = true;
         }
         if updated {
-            let mut temp_instance_buffer =
-                gpu.device
-                    .create_buffer_init(&wgpu::util::BufferInitDescriptor {
-                        label: Some("Instance Buffer"),
-                        contents: bytemuck::cast_slice(&self.instances[..]),
-                        usage: wgpu::BufferUsages::VERTEX,
-                    });
+            let mut temp_instance_buffer = gpu.device.create_buffer_init(&BufferInitDescriptor {
+                label: Some("Instance Buffer"),
+                contents: bytemuck::cast_slice(&self.instances[..]),
+                usage: BufferUsages::VERTEX,
+            });
             std::mem::swap(&mut self.instance_buffer, &mut temp_instance_buffer);
             temp_instance_buffer.destroy();
         }
@@ -73,11 +65,11 @@ pub struct Instance {
     pub color: u32,
 }
 impl Instance {
-    const ATTRS: [VertexAttribute; 2] = wgpu::vertex_attr_array![2 => Uint32, 3 => Uint32];
-    pub fn desc() -> wgpu::VertexBufferLayout<'static> {
-        wgpu::VertexBufferLayout {
-            array_stride: std::mem::size_of::<Self>() as wgpu::BufferAddress,
-            step_mode: wgpu::VertexStepMode::Instance,
+    const ATTRS: [VertexAttribute; 2] = vertex_attr_array![2 => Uint32, 3 => Uint32];
+    pub fn desc() -> VertexBufferLayout<'static> {
+        VertexBufferLayout {
+            array_stride: std::mem::size_of::<Self>() as BufferAddress,
+            step_mode: VertexStepMode::Instance,
             attributes: &Self::ATTRS,
         }
     }
@@ -98,11 +90,11 @@ pub struct Vertex {
     uv: [f32; 2],
 }
 impl Vertex {
-    const ATTRS: [VertexAttribute; 2] = wgpu::vertex_attr_array![0 => Float32x3, 1 => Float32x2];
-    pub fn desc() -> wgpu::VertexBufferLayout<'static> {
-        wgpu::VertexBufferLayout {
-            array_stride: std::mem::size_of::<Self>() as wgpu::BufferAddress,
-            step_mode: wgpu::VertexStepMode::Vertex,
+    const ATTRS: [VertexAttribute; 2] = vertex_attr_array![0 => Float32x3, 1 => Float32x2];
+    pub fn desc() -> VertexBufferLayout<'static> {
+        VertexBufferLayout {
+            array_stride: std::mem::size_of::<Self>() as BufferAddress,
+            step_mode: VertexStepMode::Vertex,
             attributes: &Self::ATTRS,
         }
     }

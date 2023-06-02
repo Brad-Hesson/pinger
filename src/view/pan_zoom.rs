@@ -1,5 +1,5 @@
 use tokio::sync::watch::Receiver;
-use wgpu::util::DeviceExt;
+use wgpu::{util::*, *};
 use winit::{
     dpi::PhysicalSize,
     event::{ElementState, Event, MouseButton, MouseScrollDelta},
@@ -13,9 +13,9 @@ pub struct PanZoomState {
     pub uniform: PanZoomUniform,
     zoom: f32,
     aspect: f32,
-    pub buffer: wgpu::Buffer,
-    pub bind_group: wgpu::BindGroup,
-    pub bind_group_layout: wgpu::BindGroupLayout,
+    pub buffer: Buffer,
+    pub bind_group: BindGroup,
+    pub bind_group_layout: BindGroupLayout,
     mouse_down: bool,
     last_position: Option<(f64, f64)>,
     modified: bool,
@@ -25,22 +25,20 @@ pub struct PanZoomState {
 impl PanZoomState {
     pub fn new(rend: &DeviceState, addr_rx: Receiver<u32>) -> Self {
         let pan_zoom_uniform = PanZoomUniform::default();
-        let pan_zoom_buffer = rend
-            .device
-            .create_buffer_init(&wgpu::util::BufferInitDescriptor {
-                label: Some("Camera Buffer"),
-                contents: bytemuck::cast_slice(&[pan_zoom_uniform]),
-                usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
-            });
+        let pan_zoom_buffer = rend.device.create_buffer_init(&BufferInitDescriptor {
+            label: Some("Camera Buffer"),
+            contents: bytemuck::cast_slice(&[pan_zoom_uniform]),
+            usage: BufferUsages::UNIFORM | BufferUsages::COPY_DST,
+        });
 
         let pan_zoom_bind_group_layout =
             rend.device
-                .create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
-                    entries: &[wgpu::BindGroupLayoutEntry {
+                .create_bind_group_layout(&BindGroupLayoutDescriptor {
+                    entries: &[BindGroupLayoutEntry {
                         binding: 0,
-                        visibility: wgpu::ShaderStages::VERTEX,
-                        ty: wgpu::BindingType::Buffer {
-                            ty: wgpu::BufferBindingType::Uniform,
+                        visibility: ShaderStages::VERTEX,
+                        ty: BindingType::Buffer {
+                            ty: BufferBindingType::Uniform,
                             has_dynamic_offset: false,
                             min_binding_size: None,
                         },
@@ -49,9 +47,9 @@ impl PanZoomState {
                     label: Some("Pan Zoom Bind Group Layout"),
                 });
 
-        let pan_zoom_bind_group = rend.device.create_bind_group(&wgpu::BindGroupDescriptor {
+        let pan_zoom_bind_group = rend.device.create_bind_group(&BindGroupDescriptor {
             layout: &pan_zoom_bind_group_layout,
-            entries: &[wgpu::BindGroupEntry {
+            entries: &[BindGroupEntry {
                 binding: 0,
                 resource: pan_zoom_buffer.as_entire_binding(),
             }],
