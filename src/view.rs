@@ -114,52 +114,56 @@ impl State {
         let pan_zoom = PanZoomState::new(&gpu, addr_rx);
         let ping_map = PingMapState::new(&gpu, instance_rx);
 
-        let shader = gpu
+        let shader_module = gpu
             .device
             .create_shader_module(include_wgsl!("view/shader.wgsl"));
-        let render_pipeline_layout = gpu
-            .device
-            .create_pipeline_layout(&PipelineLayoutDescriptor {
-                label: Some("Render Pipeline Layout"),
-                bind_group_layouts: &[&pan_zoom.bind_group_layout],
-                push_constant_ranges: &[],
-            });
-        let render_pipeline = gpu
-            .device
-            .create_render_pipeline(&RenderPipelineDescriptor {
-                label: Some("Render Pipeline"),
-                layout: Some(&render_pipeline_layout),
-                vertex: VertexState {
-                    module: &shader,
-                    entry_point: "vs_main",
-                    buffers: &[Vertex::desc(), Instance::desc()],
-                },
-                fragment: Some(FragmentState {
-                    module: &shader,
-                    entry_point: "fs_main",
-                    targets: &[Some(ColorTargetState {
-                        format: gpu.config.format,
-                        blend: Some(BlendState::REPLACE),
-                        write_mask: ColorWrites::ALL,
-                    })],
-                }),
-                primitive: PrimitiveState {
-                    topology: PrimitiveTopology::TriangleList,
-                    strip_index_format: None,
-                    front_face: FrontFace::Ccw,
-                    cull_mode: None,
-                    unclipped_depth: false,
-                    polygon_mode: PolygonMode::Fill,
-                    conservative: false,
-                },
-                depth_stencil: None,
-                multisample: MultisampleState {
-                    count: gpu.sample_count,
-                    mask: !0,
-                    alpha_to_coverage_enabled: false,
-                },
-                multiview: None,
-            });
+
+        let pipeline_layout_desc = PipelineLayoutDescriptor {
+            label: Some("Render Pipeline Layout"),
+            bind_group_layouts: &[&pan_zoom.bind_group_layout],
+            push_constant_ranges: &[],
+        };
+        let render_pipeline_layout = gpu.device.create_pipeline_layout(&pipeline_layout_desc);
+
+        let vertex_state = VertexState {
+            module: &shader_module,
+            entry_point: "vs_main",
+            buffers: &[Vertex::desc(), Instance::desc()],
+        };
+        let primitive_state = PrimitiveState {
+            topology: PrimitiveTopology::TriangleList,
+            strip_index_format: None,
+            front_face: FrontFace::Ccw,
+            cull_mode: None,
+            unclipped_depth: false,
+            polygon_mode: PolygonMode::Fill,
+            conservative: false,
+        };
+        let fragment_state = FragmentState {
+            module: &shader_module,
+            entry_point: "fs_main",
+            targets: &[Some(ColorTargetState {
+                format: gpu.config.format,
+                blend: Some(BlendState::REPLACE),
+                write_mask: ColorWrites::ALL,
+            })],
+        };
+        let multisample_state = MultisampleState {
+            count: gpu.sample_count,
+            mask: !0,
+            alpha_to_coverage_enabled: false,
+        };
+        let render_pipeline_desc = RenderPipelineDescriptor {
+            label: Some("Render Pipeline"),
+            layout: Some(&render_pipeline_layout),
+            vertex: vertex_state,
+            fragment: Some(fragment_state),
+            primitive: primitive_state,
+            depth_stencil: None,
+            multisample: multisample_state,
+            multiview: None,
+        };
+        let render_pipeline = gpu.device.create_render_pipeline(&render_pipeline_desc);
 
         Self {
             gpu,
@@ -186,21 +190,17 @@ impl State {
 
         {
             let mut color_attachment = RenderPassColorAttachment {
-                view: &self.gpu.multisample_framebuffer,
-                resolve_target: Some(&view),
+                view: &view,
+                resolve_target: None,
                 ops: Operations {
-                    load: LoadOp::Clear(Color {
-                        r: 0.0,
-                        g: 0.0,
-                        b: 0.0,
-                        a: 1.0,
-                    }),
-                    store: self.gpu.sample_count == 1,
+                    load: LoadOp::Clear(Color::BLACK),
+                    store: true,
                 },
             };
-            if self.gpu.sample_count == 1 {
-                color_attachment.view = &view;
-                color_attachment.resolve_target = None;
+            if self.gpu.sample_count > 1 {
+                color_attachment.view = &self.gpu.multisample_framebuffer;
+                color_attachment.resolve_target = Some(&view);
+                color_attachment.ops.store = false;
             }
             let render_pass_descriptor = RenderPassDescriptor {
                 label: Some("Render Pass"),

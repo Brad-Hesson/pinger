@@ -37,7 +37,8 @@ impl DeviceState {
                 &wgpu::DeviceDescriptor {
                     label: None,
                     features: wgpu::Features::empty()
-                        | Features::TEXTURE_ADAPTER_SPECIFIC_FORMAT_FEATURES,
+                        | Features::TEXTURE_ADAPTER_SPECIFIC_FORMAT_FEATURES
+                        | Features::CONSERVATIVE_RASTERIZATION,
                     limits: wgpu::Limits::default(),
                 },
                 None,
@@ -61,6 +62,7 @@ impl DeviceState {
         {
             sample_count /= 2;
         }
+        tracing::info!("Sample Count: {sample_count}");
         let config = wgpu::SurfaceConfiguration {
             usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
             format: surface_format,
