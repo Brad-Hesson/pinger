@@ -65,7 +65,7 @@ pub struct Instance {
     pub color: u32,
 }
 impl Instance {
-    const ATTRS: [VertexAttribute; 2] = vertex_attr_array![2 => Uint32, 3 => Uint32];
+    const ATTRS: [VertexAttribute; 2] = vertex_attr_array![1 => Uint32, 2 => Uint32];
     pub fn desc() -> VertexBufferLayout<'static> {
         VertexBufferLayout {
             array_stride: std::mem::size_of::<Self>() as BufferAddress,
@@ -86,11 +86,10 @@ impl From<Ipv4Addr> for Instance {
 #[repr(C)]
 #[derive(Copy, Clone, Debug, bytemuck::Pod, bytemuck::Zeroable)]
 pub struct Vertex {
-    position: [f32; 3],
-    uv: [f32; 2],
+    position: [f32; 2],
 }
 impl Vertex {
-    const ATTRS: [VertexAttribute; 2] = vertex_attr_array![0 => Float32x3, 1 => Float32x2];
+    const ATTRS: [VertexAttribute; 1] = vertex_attr_array![0 => Float32x2];
     pub fn desc() -> VertexBufferLayout<'static> {
         VertexBufferLayout {
             array_stride: std::mem::size_of::<Self>() as BufferAddress,
@@ -100,22 +99,19 @@ impl Vertex {
     }
 }
 
+const CORNER: f32 = 0.00001525878;
 const INDICES: &[u16] = &[0, 1, 2, 2, 1, 3];
 const VERTICES: &[Vertex] = &[
     Vertex {
-        position: [-1.0, -1.0, 0.0],
-        uv: [0.0, 0.0],
+        position: [-CORNER, -CORNER],
     },
     Vertex {
-        position: [1.0, -1.0, 0.0],
-        uv: [0.0, 1.0],
+        position: [CORNER, -CORNER],
     },
     Vertex {
-        position: [-1.0, 1.0, 0.0],
-        uv: [1.0, 0.0],
+        position: [-CORNER, CORNER],
     },
     Vertex {
-        position: [1.0, 1.0, 0.0],
-        uv: [1.0, 1.0],
+        position: [CORNER, CORNER],
     },
 ];

@@ -16,16 +16,16 @@ impl DeviceState {
     pub async fn new(window: Window) -> Self {
         let size = window.inner_size();
 
-        let instance = wgpu::Instance::new(wgpu::InstanceDescriptor {
-            backends: wgpu::Backends::all(),
+        let instance = Instance::new(InstanceDescriptor {
+            backends: Backends::all(),
             dx12_shader_compiler: Default::default(),
         });
 
         let surface = unsafe { instance.create_surface(&window) }.unwrap();
 
         let adapter = instance
-            .request_adapter(&wgpu::RequestAdapterOptionsBase {
-                power_preference: wgpu::PowerPreference::HighPerformance,
+            .request_adapter(&RequestAdapterOptionsBase {
+                power_preference: PowerPreference::HighPerformance,
                 force_fallback_adapter: false,
                 compatible_surface: Some(&surface),
             })
@@ -34,12 +34,11 @@ impl DeviceState {
 
         let (device, queue) = adapter
             .request_device(
-                &wgpu::DeviceDescriptor {
+                &DeviceDescriptor {
                     label: None,
-                    features: wgpu::Features::empty()
-                        | Features::TEXTURE_ADAPTER_SPECIFIC_FORMAT_FEATURES
-                        | Features::CONSERVATIVE_RASTERIZATION,
-                    limits: wgpu::Limits::default(),
+                    features: Features::empty()
+                        | Features::TEXTURE_ADAPTER_SPECIFIC_FORMAT_FEATURES,
+                    limits: Limits::default(),
                 },
                 None,
             )
@@ -63,8 +62,8 @@ impl DeviceState {
             sample_count /= 2;
         }
         tracing::info!("Sample Count: {sample_count}");
-        let config = wgpu::SurfaceConfiguration {
-            usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
+        let config = SurfaceConfiguration {
+            usage: TextureUsages::RENDER_ATTACHMENT,
             format: surface_format,
             width: size.width,
             height: size.height,
