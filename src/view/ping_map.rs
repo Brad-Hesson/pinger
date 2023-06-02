@@ -47,13 +47,11 @@ impl PingMapState {
             updated = true;
         }
         if updated {
-            let mut temp_instance_buffer = gpu.device.create_buffer_init(&BufferInitDescriptor {
+            self.instance_buffer = gpu.device.create_buffer_init(&BufferInitDescriptor {
                 label: Some("Instance Buffer"),
                 contents: bytemuck::cast_slice(&self.instances[..]),
                 usage: BufferUsages::VERTEX,
             });
-            std::mem::swap(&mut self.instance_buffer, &mut temp_instance_buffer);
-            temp_instance_buffer.destroy();
         }
     }
 }
@@ -61,7 +59,7 @@ impl PingMapState {
 #[repr(C)]
 #[derive(Debug, Copy, Clone, bytemuck::Pod, bytemuck::Zeroable)]
 pub struct Instance {
-    pub hilb: u32,
+    pub address: u32,
     pub color: u32,
 }
 impl Instance {
@@ -77,8 +75,8 @@ impl Instance {
 impl From<Ipv4Addr> for Instance {
     fn from(addr: Ipv4Addr) -> Self {
         Self {
-            hilb: u32::from_be_bytes(addr.octets()),
-            color: u32::from_be_bytes([100, 100, 100, 100]),
+            address: u32::from_be_bytes(addr.octets()),
+            color: u32::from_be_bytes([255, 255, 255, 255]),
         }
     }
 }

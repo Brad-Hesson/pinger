@@ -46,7 +46,7 @@ impl DeviceState {
             .unwrap();
 
         let surface_caps = surface.get_capabilities(&adapter);
-        tracing::info!("{surface_caps:?}");
+        tracing::warn!("{surface_caps:?}");
         let surface_format = surface_caps
             .formats
             .iter()

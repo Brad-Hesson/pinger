@@ -1,13 +1,12 @@
-
 struct InstanceInput {
-    @location(1) hilbert: u32,
+    @location(1) address: u32,
     @location(2) color: u32
 }
 
 struct VertexOutput {
     @builtin(position) clip_position: vec4<f32>,
     @location(1) color: vec4<f32>
-};
+}
 
 struct PanZoomUniform {
     pan: vec2<f32>,
@@ -22,7 +21,7 @@ fn vs_main(
     instance: InstanceInput
 ) -> VertexOutput {
     var vertex = vertex;
-    vertex += hilbert_coords(instance.hilbert);
+    vertex += addr_to_coords(instance.address);
     vertex += pan_zoom.pan;
     vertex *= pan_zoom.zoom;
     var out: VertexOutput;
@@ -36,7 +35,7 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
     return in.color;
 }
 
-fn hilbert_coords(d: u32) -> vec2<f32> {
+fn addr_to_coords(d: u32) -> vec2<f32> {
     var out = vec2<u32>(0u, 0u);
     var d = d;
     for (var s: u32 = 1u ; s < (1u << 16u); s *= 2u) {
