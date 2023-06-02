@@ -1,3 +1,4 @@
+use wgpu::*;
 use winit::{event::Event, window::Window};
 
 pub struct DeviceState {
@@ -7,6 +8,8 @@ pub struct DeviceState {
     pub config: wgpu::SurfaceConfiguration,
     pub size: winit::dpi::PhysicalSize<u32>,
     pub window: Window,
+    pub sample_count: u32,
+    pub multisample_framebuffer: TextureView,
 }
 
 impl DeviceState {
@@ -33,7 +36,8 @@ impl DeviceState {
             .request_device(
                 &wgpu::DeviceDescriptor {
                     label: None,
-                    features: wgpu::Features::empty(),
+                    features: wgpu::Features::empty()
+                        | Features::TEXTURE_ADAPTER_SPECIFIC_FORMAT_FEATURES,
                     limits: wgpu::Limits::default(),
                 },
                 None,
@@ -49,6 +53,14 @@ impl DeviceState {
             .copied()
             .find(|f| f.is_srgb())
             .unwrap_or(surface_caps.formats[0]);
+        let mut sample_count = 16;
+        while !adapter
+            .get_texture_format_features(surface_format)
+            .flags
+            .sample_count_supported(sample_count)
+        {
+            sample_count /= 2;
+        }
         let config = wgpu::SurfaceConfiguration {
             usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
             format: surface_format,
@@ -60,6 +72,23 @@ impl DeviceState {
         };
         surface.configure(&device, &config);
 
+        let multisample_framebuffer = device
+            .create_texture(&TextureDescriptor {
+                label: Some("Multisample Framebuffer"),
+                size: Extent3d {
+                    width: size.width,
+                    height: size.height,
+                    depth_or_array_layers: 1,
+                },
+                mip_level_count: 1,
+                sample_count,
+                dimension: TextureDimension::D2,
+                format: surface_format,
+                usage: TextureUsages::RENDER_ATTACHMENT,
+                view_formats: &[],
+            })
+            .create_view(&TextureViewDescriptor::default());
+
         Self {
             surface,
             device,
@@ -67,6 +96,8 @@ impl DeviceState {
             config,
             size,
             window,
+            sample_count,
+            multisample_framebuffer,
         }
     }
 
@@ -76,6 +107,23 @@ impl DeviceState {
             self.config.width = new_size.width;
             self.config.height = new_size.height;
             self.surface.configure(&self.device, &self.config);
+            self.multisample_framebuffer = self
+                .device
+                .create_texture(&TextureDescriptor {
+                    label: Some("Multisample Framebuffer"),
+                    size: Extent3d {
+                        width: new_size.width,
+                        height: new_size.height,
+                        depth_or_array_layers: 1,
+                    },
+                    mip_level_count: 1,
+                    sample_count: self.sample_count,
+                    dimension: TextureDimension::D2,
+                    format: self.config.format,
+                    usage: TextureUsages::RENDER_ATTACHMENT,
+                    view_formats: &[],
+                })
+                .create_view(&TextureViewDescriptor::default());
         }
     }
     pub fn update(&mut self, event: &Event<()>) {

@@ -154,7 +154,7 @@ impl State {
                 },
                 depth_stencil: None,
                 multisample: MultisampleState {
-                    count: 1,
+                    count: gpu.sample_count,
                     mask: !0,
                     alpha_to_coverage_enabled: false,
                 },
@@ -185,23 +185,29 @@ impl State {
             });
 
         {
-            let mut render_pass = encoder.begin_render_pass(&RenderPassDescriptor {
+            let mut color_attachment = RenderPassColorAttachment {
+                view: &self.gpu.multisample_framebuffer,
+                resolve_target: Some(&view),
+                ops: Operations {
+                    load: LoadOp::Clear(Color {
+                        r: 0.0,
+                        g: 0.0,
+                        b: 0.0,
+                        a: 1.0,
+                    }),
+                    store: self.gpu.sample_count == 1,
+                },
+            };
+            if self.gpu.sample_count == 1 {
+                color_attachment.view = &view;
+                color_attachment.resolve_target = None;
+            }
+            let render_pass_descriptor = RenderPassDescriptor {
                 label: Some("Render Pass"),
                 depth_stencil_attachment: None,
-                color_attachments: &[Some(RenderPassColorAttachment {
-                    view: &view,
-                    resolve_target: None,
-                    ops: Operations {
-                        load: LoadOp::Clear(Color {
-                            r: 0.0,
-                            g: 0.0,
-                            b: 0.0,
-                            a: 1.0,
-                        }),
-                        store: true,
-                    },
-                })],
-            });
+                color_attachments: &mut [Some(color_attachment)],
+            };
+            let mut render_pass = encoder.begin_render_pass(&render_pass_descriptor);
             render_pass.set_pipeline(&self.render_pipeline);
             render_pass.set_bind_group(0, &self.pan_zoom.bind_group, &[]);
             render_pass.set_vertex_buffer(0, self.ping_map.vertex_buffer.slice(..));
