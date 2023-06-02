@@ -89,7 +89,6 @@ pub async fn main(args: Args) {
         // Send the worker handle to the file writer
         tx.send(handle).unwrap();
         // Wait until the running count drops below the max threshold given in the cli arg
-        tokio::task::yield_now().await;
         let num_running = state.num_running.load(Ordering::Acquire);
         for _ in 0..num_running / args.speed_factor {
             tokio::task::yield_now().await;
