@@ -89,7 +89,9 @@ pub async fn main(args: Args) {
         // Send the worker handle to the file writer
         tx.send(handle).unwrap();
         // Wait until the running count drops below the max threshold given in the cli arg
-        while state.num_running.load(Ordering::Acquire) >= args.num_concurrent {
+        tokio::task::yield_now().await;
+        let num_running = state.num_running.load(Ordering::Acquire);
+        for _ in 0..num_running / args.speed_factor {
             tokio::task::yield_now().await;
         }
     }
@@ -194,9 +196,9 @@ impl State {
 
 #[derive(Debug, clap::Args)]
 pub struct Args {
-    /// The maximuim number of concurrent pings
-    #[arg(default_value_t = 100_000, short, long)]
-    num_concurrent: usize,
+    /// A unitless nmumber representing how fast to send pings (higher is faster)
+    #[arg(default_value_t = 2, short = 'f', long)]
+    speed_factor: usize,
     /// The interval for printings stats in seconds
     #[arg(default_value_t = 1, short, long)]
     update_interval: u64,
