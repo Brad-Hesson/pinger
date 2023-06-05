@@ -38,30 +38,29 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
 fn addr_to_coords(d: u32) -> vec2<f32> {
     var out = vec2<u32>(0u, 0u);
     var d = d;
-    for (var s: u32 = 1u ; s < (1u << 16u); s *= 2u) {
-        var rx = 1u & (d / 2u);
-        var ry = 1u & (d ^ rx);
-        if ry == 0u {
-            if rx == 1u {
-                out.x = s - 1u - out.x;
-                out.y = s - 1u - out.y;
+    for (var s: u32 = 1u ; s < (1u << 16u); s <<= 1u) {
+        var r: vec2<u32>;
+        r.x = 1u & (d / 2u);
+        r.y = 1u & (d ^ r.x);
+        if r.y == 0u {
+            if r.x == 1u {
+                out = s - 1u - out;
             }
             let tmp = out.x;
             out.x = out.y;
             out.y = tmp;
         }
-        out.x += s * rx;
-        out.y += s * ry;
-        d /= 4u;
+        out |= s * r;
+        d >>= 2u;
     }
     return vec2<f32>(out) * 2. / f32(1u << 16u) - 1.;
 }
 
 fn color_from_u32(color: u32) -> vec4<f32> {
     return vec4<f32>(
-        f32((color >> 24u) & 0xFFu) / 255.,
-        f32((color >> 16u) & 0xFFu) / 255.,
-        f32((color >> 8u) & 0xFFu) / 255.,
-        f32((color >> 0u) & 0xFFu) / 255.,
-    );
+        f32((color >> 24u) & 0xFFu),
+        f32((color >> 16u) & 0xFFu),
+        f32((color >> 8u) & 0xFFu),
+        f32((color >> 0u) & 0xFFu),
+    ) / 255.;
 }
