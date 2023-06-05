@@ -57,7 +57,6 @@ impl PingMapState {
                 });
                 self.instance_buffers.push((b - a, buffer));
             }
-            tracing::warn!("Number of instance buffers: {}", self.instance_buffers.len());
         }
     }
 }
