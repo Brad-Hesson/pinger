@@ -85,7 +85,7 @@ pub async fn main(args: Args) {
         // Add 1 to the running count
         state.num_running.fetch_add(1, Ordering::Release);
         // Spawn the worker
-        let handle = tokio::spawn(ping_worker(pinger, state.clone()));
+        let handle = tokio::spawn(ping_worker(pinger, state.clone(), args.num_retries));
         // Send the worker handle to the file writer
         tx.send(handle).unwrap();
         // Wait until the running count drops below the max threshold given in the cli arg
@@ -150,12 +150,12 @@ async fn stats_printer(state: Arc<State>, interval: Duration) {
     }
 }
 
-async fn ping_worker(mut pinger: surge_ping::Pinger, state: Arc<State>) -> Option<Duration> {
+async fn ping_worker(mut pinger: surge_ping::Pinger, state: Arc<State>, num_retries: usize) -> Option<Duration> {
     // Start the ping and await its return.
-    let mut i = 0;
+    let mut i = 1;
     let reply = loop {
         let reply = pinger.ping(0.into(), &[]).await;
-        if i > 5 || reply.is_ok() {
+        if i >= num_retries || reply.is_ok() {
             break reply;
         }
         i += 1;
@@ -198,6 +198,9 @@ pub struct Args {
     /// A unitless nmumber representing how fast to send pings (higher is faster)
     #[arg(default_value_t = 2, short = 'f', long)]
     speed_factor: usize,
+    /// THe number of times to retry pinging each address
+    #[arg(default_value_t = 2, short, long)]
+    num_retries: usize,
     /// The interval for printings stats in seconds
     #[arg(default_value_t = 1, short, long)]
     update_interval: u64,
