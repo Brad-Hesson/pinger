@@ -43,8 +43,10 @@ impl PingMapState {
             updated = true;
         }
         if updated {
+            let max_instance_buffer =
+                gpu.device.limits().max_buffer_size as usize / std::mem::size_of::<Instance>();
             let inds = (0..)
-                .map(|v| v * 2usize.pow(25))
+                .map(|v| v * max_instance_buffer)
                 .take_while(|v| *v < self.instances.len())
                 .chain(Some(self.instances.len()))
                 .tuple_windows::<(_, _)>();
