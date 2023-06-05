@@ -1,5 +1,6 @@
 use std::net::Ipv4Addr;
 
+use itertools::Itertools;
 use tokio::sync::mpsc::UnboundedReceiver;
 use wgpu::{util::*, *};
 
@@ -8,18 +9,13 @@ use super::renderer::DeviceState;
 pub struct PingMapState {
     pub instances: Vec<Instance>,
     pub indicies: Vec<u16>,
-    pub instance_buffer: Buffer,
+    pub instance_buffers: Vec<(usize, Buffer)>,
     pub vertex_buffer: Buffer,
     pub index_buffer: Buffer,
     pub rx: UnboundedReceiver<Instance>,
 }
 impl PingMapState {
     pub fn new(gpu: &DeviceState, rx: UnboundedReceiver<Instance>) -> Self {
-        let instance_buffer = gpu.device.create_buffer_init(&BufferInitDescriptor {
-            label: Some("Instance Buffer"),
-            contents: &[],
-            usage: BufferUsages::VERTEX,
-        });
         let vertex_buffer = gpu.device.create_buffer_init(&BufferInitDescriptor {
             label: Some("Vertex Buffer"),
             contents: bytemuck::cast_slice(VERTICES),
@@ -34,7 +30,7 @@ impl PingMapState {
         Self {
             indicies: INDICES.into(),
             instances: vec![],
-            instance_buffer,
+            instance_buffers: vec![],
             rx,
             vertex_buffer,
             index_buffer,
@@ -47,11 +43,21 @@ impl PingMapState {
             updated = true;
         }
         if updated {
-            self.instance_buffer = gpu.device.create_buffer_init(&BufferInitDescriptor {
-                label: Some("Instance Buffer"),
-                contents: bytemuck::cast_slice(&self.instances[..]),
-                usage: BufferUsages::VERTEX,
-            });
+            let inds = (0..)
+                .map(|v| v * 2usize.pow(25))
+                .take_while(|v| *v < self.instances.len())
+                .chain(Some(self.instances.len()))
+                .tuple_windows::<(_, _)>();
+            self.instance_buffers.clear();
+            for (a, b) in inds {
+                let buffer = gpu.device.create_buffer_init(&BufferInitDescriptor {
+                    label: Some("Instance Buffer"),
+                    contents: bytemuck::cast_slice(&self.instances[a..b]),
+                    usage: BufferUsages::VERTEX,
+                });
+                self.instance_buffers.push((b - a, buffer));
+            }
+            tracing::warn!("Number of instance buffers: {}", self.instance_buffers.len());
         }
     }
 }

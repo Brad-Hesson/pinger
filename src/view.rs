@@ -210,14 +210,12 @@ impl State {
             let mut render_pass = encoder.begin_render_pass(&render_pass_descriptor);
             render_pass.set_pipeline(&self.render_pipeline);
             render_pass.set_bind_group(0, &self.pan_zoom.bind_group, &[]);
-            render_pass.set_vertex_buffer(0, self.ping_map.vertex_buffer.slice(..));
-            render_pass.set_vertex_buffer(1, self.ping_map.instance_buffer.slice(..));
             render_pass.set_index_buffer(self.ping_map.index_buffer.slice(..), IndexFormat::Uint16);
-            render_pass.draw_indexed(
-                0..self.ping_map.indicies.len() as _,
-                0,
-                0..self.ping_map.instances.len() as _,
-            );
+            render_pass.set_vertex_buffer(0, self.ping_map.vertex_buffer.slice(..));
+            for (len, buffer) in &self.ping_map.instance_buffers {
+                render_pass.set_vertex_buffer(1, buffer.slice(..));
+                render_pass.draw_indexed(0..self.ping_map.indicies.len() as _, 0, 0..*len as _);
+            }
         }
 
         self.gpu.queue.submit(Some(encoder.finish()));
