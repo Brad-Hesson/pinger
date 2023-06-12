@@ -7,7 +7,8 @@ pub struct GpuState {
     pub queue: Queue,
     pub surface: Surface,
     pub surface_config: SurfaceConfiguration,
-    pub msaa: MsaaData,
+    pub sample_count: u32,
+    pub msaa_texture_view: Option<TextureView>,
 }
 impl GpuState {
     pub async fn new(window: &Window) -> Self {
@@ -18,25 +19,23 @@ impl GpuState {
 
         let surface = unsafe { instance.create_surface(window) }.unwrap();
 
+        let request_adapter_options = RequestAdapterOptionsBase {
+            power_preference: PowerPreference::HighPerformance,
+            force_fallback_adapter: false,
+            compatible_surface: Some(&surface),
+        };
         let adapter = instance
-            .request_adapter(&RequestAdapterOptionsBase {
-                power_preference: PowerPreference::HighPerformance,
-                force_fallback_adapter: false,
-                compatible_surface: Some(&surface),
-            })
+            .request_adapter(&request_adapter_options)
             .await
             .unwrap();
 
+        let device_descriptor = DeviceDescriptor {
+            label: None,
+            features: Features::empty() | Features::TEXTURE_ADAPTER_SPECIFIC_FORMAT_FEATURES,
+            limits: Limits::default(),
+        };
         let (device, queue) = adapter
-            .request_device(
-                &DeviceDescriptor {
-                    label: None,
-                    features: Features::empty()
-                        | Features::TEXTURE_ADAPTER_SPECIFIC_FORMAT_FEATURES,
-                    limits: Limits::default(),
-                },
-                None,
-            )
+            .request_device(&device_descriptor, None)
             .await
             .unwrap();
 
@@ -71,13 +70,11 @@ impl GpuState {
             queue,
             surface,
             surface_config,
-            msaa: MsaaData {
-                sample_count,
-                framebuffer: None,
-            },
+            msaa_texture_view: None,
+            sample_count,
         };
         if sample_count > 1 {
-            out.msaa.framebuffer = Some(out.create_msaa_texture_view());
+            out.msaa_texture_view = Some(out.create_msaa_texture_view());
         }
         out
     }
@@ -91,7 +88,7 @@ impl GpuState {
                     depth_or_array_layers: 1,
                 },
                 mip_level_count: 1,
-                sample_count: self.msaa.sample_count,
+                sample_count: self.sample_count,
                 dimension: TextureDimension::D2,
                 format: self.surface_config.format,
                 usage: TextureUsages::RENDER_ATTACHMENT,
@@ -106,8 +103,8 @@ impl GpuState {
         self.surface_config.width = size.width;
         self.surface_config.height = size.height;
         self.surface.configure(&self.device, &self.surface_config);
-        if self.msaa.framebuffer.is_some() {
-            *self.msaa.framebuffer.as_mut().unwrap() = self.create_msaa_texture_view();
+        if self.sample_count > 1 {
+            self.msaa_texture_view = Some(self.create_msaa_texture_view());
         }
     }
     pub fn get_screen_descriptor(&self, window: &Window) -> ScreenDescriptor {
@@ -122,16 +119,16 @@ impl GpuState {
         output_texture: &'a TextureView,
     ) -> RenderPass {
         let mut color_attachment = RenderPassColorAttachment {
-            view: &output_texture,
+            view: output_texture,
             resolve_target: None,
             ops: Operations {
                 load: LoadOp::Clear(Color::BLACK),
                 store: true,
             },
         };
-        if let Some(ref msaa_texture_view) = self.msaa.framebuffer {
-            color_attachment.view = msaa_texture_view;
-            color_attachment.resolve_target = Some(&output_texture);
+        if self.sample_count > 1 {
+            color_attachment.view = self.msaa_texture_view.as_ref().unwrap();
+            color_attachment.resolve_target = Some(output_texture);
             color_attachment.ops.store = false;
         }
         let render_pass_descriptor = RenderPassDescriptor {
@@ -147,9 +144,4 @@ impl GpuState {
                 label: Some("Render Encoder"),
             })
     }
-}
-
-pub struct MsaaData {
-    pub sample_count: u32,
-    pub framebuffer: Option<TextureView>,
 }

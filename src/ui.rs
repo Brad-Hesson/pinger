@@ -1,7 +1,9 @@
-use std::path::{Path, PathBuf};
+use std::{
+    iter,
+    path::{Path, PathBuf},
+};
 
 use egui::Context;
-use egui_winit::EventResponse;
 use wgpu::*;
 use winit::{event::WindowEvent, event_loop::ControlFlow};
 
@@ -29,7 +31,7 @@ pub async fn main() {
         &gpu.device,
         gpu.surface_config.format,
         None,
-        gpu.msaa.sample_count,
+        gpu.sample_count,
     );
     let egui_ctx = egui::Context::default();
 
@@ -37,11 +39,11 @@ pub async fn main() {
 
     event_loop.run(move |event, _, control_flow| match event {
         winit::event::Event::WindowEvent { event, .. } => {
-            let EventResponse { consumed, repaint } = egui_platform.on_event(&egui_ctx, &event);
-            if repaint {
+            let egui_result = egui_platform.on_event(&egui_ctx, &event);
+            if egui_result.repaint {
                 window.request_redraw();
             }
-            if consumed {
+            if egui_result.consumed {
                 return;
             }
             match event {
@@ -61,33 +63,33 @@ pub async fn main() {
                 .texture
                 .create_view(&TextureViewDescriptor::default());
 
-            let input = egui_platform.take_egui_input(&window);
-            egui_ctx.begin_frame(input);
+            let egui_input = egui_platform.take_egui_input(&window);
+            egui_ctx.begin_frame(egui_input);
             ui_state.run(&egui_ctx);
-            let full_output = egui_ctx.end_frame();
-            egui_platform.handle_platform_output(&window, &egui_ctx, full_output.platform_output);
+            let egui_output = egui_ctx.end_frame();
+            egui_platform.handle_platform_output(&window, &egui_ctx, egui_output.platform_output);
 
-            let paint_jobs = egui_ctx.tessellate(full_output.shapes);
             let mut encoder = gpu.create_command_encoder();
+            let egui_primitives = egui_ctx.tessellate(egui_output.shapes);
             let screen_descriptor = gpu.get_screen_descriptor(&window);
             egui_renderer.update_buffers(
                 &gpu.device,
                 &gpu.queue,
                 &mut encoder,
-                &paint_jobs[..],
+                &egui_primitives[..],
                 &screen_descriptor,
             );
-            for (texture_id, image_delta) in full_output.textures_delta.set {
+            for (texture_id, image_delta) in egui_output.textures_delta.set {
                 egui_renderer.update_texture(&gpu.device, &gpu.queue, texture_id, &image_delta);
             }
             egui_renderer.render(
                 &mut gpu.create_render_pass(&mut encoder, &view),
-                &paint_jobs[..],
+                &egui_primitives[..],
                 &screen_descriptor,
             );
-            gpu.queue.submit(Some(encoder.finish()));
+            gpu.queue.submit(iter::once(encoder.finish()));
             output_texture.present();
-            for texture_id in full_output.textures_delta.free {
+            for texture_id in egui_output.textures_delta.free {
                 egui_renderer.free_texture(&texture_id);
             }
         }

@@ -251,15 +251,13 @@ fn hilbert_decode(mut d: u32, bits: u32) -> [u32; 2] {
                 out[0] = s - 1 - out[0];
                 out[1] = s - 1 - out[1];
             }
-            let tmp = out[0];
-            out[0] = out[1];
-            out[1] = tmp;
+            out.swap(0, 1);
         }
         out[0] += s * rx;
         out[1] += s * ry;
         d /= 4;
     }
-    return out;
+    out
 }
 
 #[derive(Debug, clap::Args)]
