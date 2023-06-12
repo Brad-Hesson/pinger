@@ -2,6 +2,7 @@ use clap::Parser;
 
 mod ping;
 mod view;
+mod ui;
 
 #[tokio::main]
 async fn main() {
@@ -9,6 +10,7 @@ async fn main() {
     match Args::parse().subcommand {
         Subcommand::Ping(args) => ping::main(args).await,
         Subcommand::View(args) => view::main(args).await,
+        Subcommand::Ui => ui::main().await,
     }
 }
 #[derive(Parser, Debug)]
@@ -23,4 +25,5 @@ enum Subcommand {
     Ping(ping::Args),
     /// Graphically display the response data from a .ping file
     View(view::Args),
+    Ui,
 }
