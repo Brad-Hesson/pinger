@@ -1,4 +1,4 @@
-use std::{path::Path, time::Duration};
+use std::{iter, path::Path, time::Duration};
 
 use ipnet::Ipv4Net;
 use iprange::IpRange;
@@ -19,7 +19,7 @@ use winit::{
     window::{Window, WindowBuilder},
 };
 
-use crate::view::renderer::DeviceState;
+use crate::gpu::GpuState;
 
 use self::{
     pan_zoom::PanZoomState,
@@ -28,7 +28,6 @@ use self::{
 
 mod pan_zoom;
 mod ping_map;
-mod renderer;
 
 pub async fn main(args: Args) {
     tracing_subscriber::fmt::fmt()
@@ -42,11 +41,11 @@ pub async fn main(args: Args) {
     let event_loop = EventLoop::new();
     let window = WindowBuilder::new().build(&event_loop).unwrap();
 
-    let mut state = State::new(window, instance_rx, addr_rx).await;
+    let mut state = State::new(&window, instance_rx, addr_rx).await;
 
     event_loop.run(move |event, _, control_flow| {
         use winit::event::{Event::*, WindowEvent::*};
-        state.update(&event);
+        state.handle_event(&event);
         match event {
             WindowEvent {
                 event: CloseRequested,
@@ -56,11 +55,11 @@ pub async fn main(args: Args) {
                 let result = state.render();
                 match result {
                     Ok(_) => {}
-                    Err(SurfaceError::Lost) => state.gpu.resize(state.gpu.size),
                     Err(SurfaceError::OutOfMemory) => *control_flow = ControlFlow::Exit,
                     Err(e) => tracing::warn!("{e:?}"),
                 }
             }
+            MainEventsCleared => window.request_redraw(),
             _ => {}
         }
     })
@@ -99,18 +98,18 @@ async fn read_f32_wait(buf_reader: &mut BufReader<File>, dur: Duration) -> io::R
 }
 
 struct State {
-    gpu: DeviceState,
+    gpu: GpuState,
     pan_zoom: PanZoomState,
     ping_map: PingMapState,
     render_pipeline: RenderPipeline,
 }
 impl State {
     async fn new(
-        window: Window,
+        window: &Window,
         instance_rx: UnboundedReceiver<Instance>,
         addr_rx: Receiver<u32>,
     ) -> Self {
-        let gpu = DeviceState::new(window).await;
+        let gpu = GpuState::new(&window).await;
         let pan_zoom = PanZoomState::new(&gpu, addr_rx);
         let ping_map = PingMapState::new(&gpu, instance_rx);
 
@@ -143,7 +142,7 @@ impl State {
             module: &shader_module,
             entry_point: "fs_main",
             targets: &[Some(ColorTargetState {
-                format: gpu.config.format,
+                format: gpu.surface_config.format,
                 blend: Some(BlendState::REPLACE),
                 write_mask: ColorWrites::ALL,
             })],
@@ -173,41 +172,17 @@ impl State {
         }
     }
     fn render(&mut self) -> Result<(), SurfaceError> {
-        self.pan_zoom.update_buffer(&self.gpu);
-        self.ping_map.update_buffer(&self.gpu);
+        self.pan_zoom.update_buffers(&self.gpu);
+        self.ping_map.update_buffers(&self.gpu);
 
         let output = self.gpu.surface.get_current_texture()?;
         let view = output
             .texture
             .create_view(&TextureViewDescriptor::default());
 
-        let mut encoder = self
-            .gpu
-            .device
-            .create_command_encoder(&CommandEncoderDescriptor {
-                label: Some("Render Encoder"),
-            });
-
+        let mut encoder = self.gpu.create_command_encoder();
         {
-            let mut color_attachment = RenderPassColorAttachment {
-                view: &view,
-                resolve_target: None,
-                ops: Operations {
-                    load: LoadOp::Clear(Color::BLACK),
-                    store: true,
-                },
-            };
-            if self.gpu.sample_count > 1 {
-                color_attachment.view = &self.gpu.multisample_framebuffer;
-                color_attachment.resolve_target = Some(&view);
-                color_attachment.ops.store = false;
-            }
-            let render_pass_descriptor = RenderPassDescriptor {
-                label: Some("Render Pass"),
-                depth_stencil_attachment: None,
-                color_attachments: &mut [Some(color_attachment)],
-            };
-            let mut render_pass = encoder.begin_render_pass(&render_pass_descriptor);
+            let mut render_pass = self.gpu.create_render_pass(&mut encoder, &view);
             render_pass.set_pipeline(&self.render_pipeline);
             render_pass.set_bind_group(0, &self.pan_zoom.bind_group, &[]);
             render_pass.set_index_buffer(self.ping_map.index_buffer.slice(..), IndexFormat::Uint16);
@@ -218,14 +193,22 @@ impl State {
             }
         }
 
-        self.gpu.queue.submit(Some(encoder.finish()));
+        self.gpu.queue.submit(iter::once(encoder.finish()));
         output.present();
         Ok(())
     }
 
-    fn update(&mut self, event: &Event<()>) {
-        self.pan_zoom.update(&self.gpu, event);
-        self.gpu.update(event);
+    fn handle_event(&mut self, event: &Event<()>) {
+        use winit::event::WindowEvent::*;
+        self.pan_zoom.handle_event(&self.gpu, event);
+        match event {
+            Event::WindowEvent { event, .. } => match event {
+                ScaleFactorChanged { new_inner_size, .. } => self.gpu.resize(new_inner_size),
+                Resized(physical_size) => self.gpu.resize(physical_size),
+                _ => {}
+            },
+            _ => {}
+        }
     }
 }
 

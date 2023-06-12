@@ -5,9 +5,7 @@ use winit::{
     event::{ElementState, Event, MouseButton, MouseScrollDelta},
 };
 
-use crate::view::hilbert_decode;
-
-use super::renderer::DeviceState;
+use crate::{gpu, view::hilbert_decode};
 
 pub struct PanZoomState {
     pub uniform: PanZoomUniform,
@@ -23,16 +21,16 @@ pub struct PanZoomState {
     follow_mode: bool,
 }
 impl PanZoomState {
-    pub fn new(rend: &DeviceState, addr_rx: Receiver<u32>) -> Self {
+    pub fn new(gpu: &gpu::GpuState, addr_rx: Receiver<u32>) -> Self {
         let pan_zoom_uniform = PanZoomUniform::default();
-        let pan_zoom_buffer = rend.device.create_buffer_init(&BufferInitDescriptor {
+        let pan_zoom_buffer = gpu.device.create_buffer_init(&BufferInitDescriptor {
             label: Some("Camera Buffer"),
             contents: bytemuck::cast_slice(&[pan_zoom_uniform]),
             usage: BufferUsages::UNIFORM | BufferUsages::COPY_DST,
         });
 
         let pan_zoom_bind_group_layout =
-            rend.device
+            gpu.device
                 .create_bind_group_layout(&BindGroupLayoutDescriptor {
                     entries: &[BindGroupLayoutEntry {
                         binding: 0,
@@ -47,7 +45,7 @@ impl PanZoomState {
                     label: Some("Pan Zoom Bind Group Layout"),
                 });
 
-        let pan_zoom_bind_group = rend.device.create_bind_group(&BindGroupDescriptor {
+        let pan_zoom_bind_group = gpu.device.create_bind_group(&BindGroupDescriptor {
             layout: &pan_zoom_bind_group_layout,
             entries: &[BindGroupEntry {
                 binding: 0,
@@ -55,7 +53,7 @@ impl PanZoomState {
             }],
             label: Some("Pan Zoom Bind Group"),
         });
-        let aspect = rend.size.height as f32 / rend.size.width as f32;
+        let aspect = gpu.surface_config.height as f32 / gpu.surface_config.width as f32;
         Self {
             uniform: pan_zoom_uniform,
             buffer: pan_zoom_buffer,
@@ -86,7 +84,7 @@ impl PanZoomState {
         self.uniform.pan[0] = 1. - x as f32 / 2f32.powf(16.) * 2.;
         self.uniform.pan[1] = 1. - y as f32 / 2f32.powf(16.) * 2.;
     }
-    pub fn update(&mut self, rend: &DeviceState, event: &Event<()>) {
+    pub fn handle_event(&mut self, gpu: &gpu::GpuState, event: &Event<()>) {
         if self.follow_mode && self.addr_rx.has_changed().unwrap_or(false) {
             let addr = *self.addr_rx.borrow_and_update();
             let [x, y] = hilbert_decode(addr, 32);
@@ -114,11 +112,11 @@ impl PanZoomState {
                 if let Some((last_x, last_y)) = self.last_position {
                     if self.mouse_down && !self.follow_mode {
                         let dx = (position.x - last_x)
-                            / rend.size.width as f64
+                            / gpu.surface_config.width as f64
                             / self.uniform.scale[0] as f64
                             * 2.;
                         let dy = (position.y - last_y)
-                            / rend.size.height as f64
+                            / gpu.surface_config.height as f64
                             / self.uniform.scale[1] as f64
                             * 2.;
                         self.uniform.pan[0] += dx as f32;
@@ -138,11 +136,11 @@ impl PanZoomState {
                 self.update_scale();
                 if let Some((last_x, last_y)) = self.last_position {
                     if !self.follow_mode {
-                        let dx = (last_x / rend.size.width as f64 * 2. - 1.)
+                        let dx = (last_x / gpu.surface_config.width as f64 * 2. - 1.)
                             / self.uniform.scale[0] as f64
                             * (factor - 1.) as f64;
                         self.uniform.pan[0] -= dx as f32;
-                        let dx = (last_y / rend.size.height as f64 * 2. - 1.)
+                        let dx = (last_y / gpu.surface_config.height as f64 * 2. - 1.)
                             / self.uniform.scale[1] as f64
                             * (factor - 1.) as f64;
                         self.uniform.pan[1] += dx as f32;
@@ -162,13 +160,12 @@ impl PanZoomState {
             _ => {}
         }
     }
-    pub fn update_buffer(&mut self, renderer: &DeviceState) {
+    pub fn update_buffers(&mut self, gpu: &gpu::GpuState) {
         if !self.modified {
             return;
         }
         self.modified = false;
-        renderer
-            .queue
+        gpu.queue
             .write_buffer(&self.buffer, 0, bytemuck::cast_slice(&[self.uniform]));
     }
 }

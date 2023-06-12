@@ -4,7 +4,7 @@ use itertools::Itertools;
 use tokio::sync::mpsc::UnboundedReceiver;
 use wgpu::{util::*, *};
 
-use super::renderer::DeviceState;
+use crate::gpu;
 
 pub struct PingMapState {
     pub instances: Vec<Instance>,
@@ -15,7 +15,7 @@ pub struct PingMapState {
     pub rx: UnboundedReceiver<Instance>,
 }
 impl PingMapState {
-    pub fn new(gpu: &DeviceState, rx: UnboundedReceiver<Instance>) -> Self {
+    pub fn new(gpu: &gpu::GpuState, rx: UnboundedReceiver<Instance>) -> Self {
         let vertex_buffer = gpu.device.create_buffer_init(&BufferInitDescriptor {
             label: Some("Vertex Buffer"),
             contents: bytemuck::cast_slice(VERTICES),
@@ -36,7 +36,7 @@ impl PingMapState {
             index_buffer,
         }
     }
-    pub fn update_buffer(&mut self, gpu: &DeviceState) {
+    pub fn update_buffers(&mut self, gpu: &gpu::GpuState) {
         let mut updated = false;
         while let Ok(i) = self.rx.try_recv() {
             self.instances.push(i);
