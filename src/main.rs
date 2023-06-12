@@ -3,6 +3,7 @@ use clap::Parser;
 mod ping;
 mod view;
 mod ui;
+mod gpu;
 
 #[tokio::main]
 async fn main() {
