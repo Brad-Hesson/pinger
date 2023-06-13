@@ -27,7 +27,7 @@ use self::{
 };
 
 mod pan_zoom;
-mod ping_map;
+pub mod ping_map;
 
 pub async fn main(args: Args) {
     tracing_subscriber::fmt::fmt()
@@ -41,23 +41,31 @@ pub async fn main(args: Args) {
     let event_loop = EventLoop::new();
     let window = WindowBuilder::new().build(&event_loop).unwrap();
 
-    let mut state = State::new(&window, instance_rx, addr_rx).await;
+    let mut gpu = GpuState::new(&window).await;
+    let mut state = State::new(&gpu, &window, instance_rx, addr_rx).await;
 
     event_loop.run(move |event, _, control_flow| {
         use winit::event::{Event::*, WindowEvent::*};
-        state.handle_event(&event);
-        match event {
-            WindowEvent {
-                event: CloseRequested,
-                ..
-            } => *control_flow = ControlFlow::Exit,
+        // state.handle_event(&event);
+        match &event {
+            WindowEvent { event, .. } => match event {
+                ScaleFactorChanged { new_inner_size, .. } => gpu.resize(new_inner_size),
+                Resized(physical_size) => gpu.resize(physical_size),
+                CloseRequested => *control_flow = ControlFlow::Exit,
+                _ => {}
+            },
             RedrawRequested(..) => {
-                let result = state.render();
-                match result {
-                    Ok(_) => {}
-                    Err(SurfaceError::OutOfMemory) => *control_flow = ControlFlow::Exit,
-                    Err(e) => tracing::warn!("{e:?}"),
+                let Ok((surface, view)) = gpu.get_surface_texture() else {
+                    return
+                };
+                let mut encoder = gpu.create_command_encoder();
+                state.prepare(&gpu.device, &gpu.queue, &mut encoder);
+                {
+                    let mut render_pass = gpu.create_render_pass(&mut encoder, &view);
+                    state.paint(&mut render_pass);
                 }
+                gpu.queue.submit(iter::once(encoder.finish()));
+                surface.present();
             }
             MainEventsCleared => window.request_redraw(),
             _ => {}
@@ -98,18 +106,17 @@ async fn read_f32_wait(buf_reader: &mut BufReader<File>, dur: Duration) -> io::R
 }
 
 struct State {
-    gpu: GpuState,
     pan_zoom: PanZoomState,
     ping_map: PingMapState,
     render_pipeline: RenderPipeline,
 }
 impl State {
     async fn new(
+        gpu: &GpuState,
         window: &Window,
         instance_rx: UnboundedReceiver<Instance>,
         addr_rx: Receiver<u32>,
     ) -> Self {
-        let gpu = GpuState::new(window).await;
         let pan_zoom = PanZoomState::new(&gpu, addr_rx);
         let ping_map = PingMapState::new(&gpu, instance_rx);
 
@@ -165,48 +172,23 @@ impl State {
         let render_pipeline = gpu.device.create_render_pipeline(&render_pipeline_desc);
 
         Self {
-            gpu,
             pan_zoom,
             ping_map,
             render_pipeline,
         }
     }
-    fn render(&mut self) -> Result<(), SurfaceError> {
-        self.pan_zoom.update_buffers(&self.gpu);
-        self.ping_map.update_buffers(&self.gpu);
-
-        let output = self.gpu.surface.get_current_texture()?;
-        let view = output
-            .texture
-            .create_view(&TextureViewDescriptor::default());
-
-        let mut encoder = self.gpu.create_command_encoder();
-        {
-            let mut render_pass = self.gpu.create_render_pass(&mut encoder, &view);
-            render_pass.set_pipeline(&self.render_pipeline);
-            render_pass.set_bind_group(0, &self.pan_zoom.bind_group, &[]);
-            render_pass.set_index_buffer(self.ping_map.index_buffer.slice(..), IndexFormat::Uint16);
-            render_pass.set_vertex_buffer(0, self.ping_map.vertex_buffer.slice(..));
-            for (len, buffer) in &self.ping_map.instance_buffers {
-                render_pass.set_vertex_buffer(1, buffer.slice(..));
-                render_pass.draw_indexed(0..self.ping_map.indicies.len() as _, 0, 0..*len as _);
-            }
-        }
-
-        self.gpu.queue.submit(iter::once(encoder.finish()));
-        output.present();
-        Ok(())
+    fn prepare(&mut self, device: &Device, queue: &Queue, encoder: &mut CommandEncoder) {
+        self.pan_zoom.prepare(queue);
+        self.ping_map.prepare(device);
     }
-
-    fn handle_event(&mut self, event: &Event<()>) {
-        use winit::event::WindowEvent::*;
-        self.pan_zoom.handle_event(&self.gpu, event);
-        if let Event::WindowEvent { event, .. } = event {
-            match event {
-                ScaleFactorChanged { new_inner_size, .. } => self.gpu.resize(new_inner_size),
-                Resized(physical_size) => self.gpu.resize(physical_size),
-                _ => {}
-            }
+    fn paint<'a>(&'a self, render_pass: &mut RenderPass<'a>) {
+        render_pass.set_pipeline(&self.render_pipeline);
+        render_pass.set_bind_group(0, &self.pan_zoom.bind_group, &[]);
+        render_pass.set_index_buffer(self.ping_map.index_buffer.slice(..), IndexFormat::Uint16);
+        render_pass.set_vertex_buffer(0, self.ping_map.vertex_buffer.slice(..));
+        for (len, buffer) in &self.ping_map.instance_buffers {
+            render_pass.set_vertex_buffer(1, buffer.slice(..));
+            render_pass.draw_indexed(0..self.ping_map.indicies.len() as _, 0, 0..*len as _);
         }
     }
 }

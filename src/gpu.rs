@@ -144,4 +144,11 @@ impl GpuState {
                 label: Some("Render Encoder"),
             })
     }
+    pub fn get_surface_texture(&self) -> Result<(SurfaceTexture, TextureView), SurfaceError> {
+        let surface_texture = self.surface.get_current_texture()?;
+        let texture_view = surface_texture
+            .texture
+            .create_view(&TextureViewDescriptor::default());
+        Ok((surface_texture, texture_view))
+    }
 }

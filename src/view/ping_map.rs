@@ -36,7 +36,7 @@ impl PingMapState {
             index_buffer,
         }
     }
-    pub fn update_buffers(&mut self, gpu: &gpu::GpuState) {
+    pub fn prepare(&mut self, device: &Device) {
         let mut updated = false;
         while let Ok(i) = self.rx.try_recv() {
             self.instances.push(i);
@@ -44,7 +44,7 @@ impl PingMapState {
         }
         if updated {
             let max_instance_buffer =
-                gpu.device.limits().max_buffer_size as usize / std::mem::size_of::<Instance>();
+                device.limits().max_buffer_size as usize / std::mem::size_of::<Instance>();
             let inds = (0..)
                 .map(|v| v * max_instance_buffer)
                 .take_while(|v| *v < self.instances.len())
@@ -52,7 +52,7 @@ impl PingMapState {
                 .tuple_windows::<(_, _)>();
             self.instance_buffers.clear();
             for (a, b) in inds {
-                let buffer = gpu.device.create_buffer_init(&BufferInitDescriptor {
+                let buffer = device.create_buffer_init(&BufferInitDescriptor {
                     label: Some("Instance Buffer"),
                     contents: bytemuck::cast_slice(&self.instances[a..b]),
                     usage: BufferUsages::VERTEX,

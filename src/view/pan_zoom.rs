@@ -84,6 +84,24 @@ impl PanZoomState {
         self.uniform.pan[0] = 1. - x as f32 / 2f32.powf(16.) * 2.;
         self.uniform.pan[1] = 1. - y as f32 / 2f32.powf(16.) * 2.;
     }
+    // pub fn handle_zoom(&mut self, delta: f32, center: Option<[f64; 2]>) {
+    //     let last_zoom = self.zoom;
+    //     self.zoom = (last_zoom * 1.1f32.powf(delta)).max(1.);
+    //     let factor = self.zoom / last_zoom;
+    //     self.update_scale();
+    //     if let Some([x, y]) = center {
+    //         if !self.follow_mode {
+    //             let dx = (x / gpu.surface_config.width as f64 * 2. - 1.)
+    //                 / self.uniform.scale[0] as f64
+    //                 * (factor - 1.) as f64;
+    //             self.uniform.pan[0] -= dx as f32;
+    //             let dx = (y / gpu.surface_config.height as f64 * 2. - 1.)
+    //                 / self.uniform.scale[1] as f64
+    //                 * (factor - 1.) as f64;
+    //             self.uniform.pan[1] += dx as f32;
+    //         }
+    //     }
+    // }
     pub fn handle_event(&mut self, gpu: &gpu::GpuState, event: &Event<()>) {
         if self.follow_mode && self.addr_rx.has_changed().unwrap_or(false) {
             let addr = *self.addr_rx.borrow_and_update();
@@ -160,13 +178,12 @@ impl PanZoomState {
             _ => {}
         }
     }
-    pub fn update_buffers(&mut self, gpu: &gpu::GpuState) {
+    pub fn prepare(&mut self, queue: &Queue) {
         if !self.modified {
             return;
         }
         self.modified = false;
-        gpu.queue
-            .write_buffer(&self.buffer, 0, bytemuck::cast_slice(&[self.uniform]));
+        queue.write_buffer(&self.buffer, 0, bytemuck::cast_slice(&[self.uniform]));
     }
 }
 
