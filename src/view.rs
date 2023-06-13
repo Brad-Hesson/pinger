@@ -109,7 +109,7 @@ impl State {
         instance_rx: UnboundedReceiver<Instance>,
         addr_rx: Receiver<u32>,
     ) -> Self {
-        let gpu = GpuState::new(&window).await;
+        let gpu = GpuState::new(window).await;
         let pan_zoom = PanZoomState::new(&gpu, addr_rx);
         let ping_map = PingMapState::new(&gpu, instance_rx);
 
@@ -201,13 +201,12 @@ impl State {
     fn handle_event(&mut self, event: &Event<()>) {
         use winit::event::WindowEvent::*;
         self.pan_zoom.handle_event(&self.gpu, event);
-        match event {
-            Event::WindowEvent { event, .. } => match event {
+        if let Event::WindowEvent { event, .. } = event {
+            match event {
                 ScaleFactorChanged { new_inner_size, .. } => self.gpu.resize(new_inner_size),
                 Resized(physical_size) => self.gpu.resize(physical_size),
                 _ => {}
-            },
-            _ => {}
+            }
         }
     }
 }

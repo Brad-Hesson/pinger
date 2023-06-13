@@ -1,6 +1,7 @@
 use std::{
     iter,
     path::{Path, PathBuf},
+    sync::Arc,
 };
 
 use egui::Context;
@@ -47,7 +48,14 @@ pub async fn main() {
                 return;
             }
             match event {
-                WindowEvent::Resized(size) => gpu.resize(&size),
+                WindowEvent::Resized(size) => {
+                    gpu.resize(&size);
+                    window.request_redraw()
+                }
+                WindowEvent::ScaleFactorChanged { new_inner_size, .. } => {
+                    gpu.resize(&new_inner_size);
+                    window.request_redraw()
+                }
                 WindowEvent::CloseRequested => {
                     *control_flow = ControlFlow::Exit;
                 }
@@ -101,13 +109,16 @@ pub async fn main() {
 }
 
 struct UiState {
-    file_dialog: Option<egui_file::FileDialog>,
+    file_open_dialog: egui_file::FileDialog,
     current_file: Option<PathBuf>,
 }
 impl UiState {
     fn new() -> Self {
+        let file_dialog_filter =
+            Box::new(|path: &Path| path.extension().is_some_and(|s| s == "ping"));
+        let file_open_dialog = egui_file::FileDialog::open_file(None).filter(file_dialog_filter);
         Self {
-            file_dialog: None,
+            file_open_dialog,
             current_file: None,
         }
     }
@@ -115,21 +126,44 @@ impl UiState {
         egui::TopBottomPanel::top("menu_bar").show(ctx, |ui| {
             ui.horizontal(|ui| {
                 ui.menu_button("File", |ui| {
-                    if ui.button("Open").clicked() {
-                        let mut file_dialog = egui_file::FileDialog::open_file(None).filter(
-                            Box::new(|path: &Path| path.extension().is_some_and(|s| s == "ping")),
-                        );
-                        file_dialog.open();
-                        self.file_dialog = Some(file_dialog);
+                    if ui.button("Open...").clicked() {
+                        ui.close_menu();
+                        self.file_open_dialog.open();
                     }
                 });
                 ui.label(format!("Current File: {:?}", self.current_file));
             })
         });
-        if let Some(ref mut file_dialog) = self.file_dialog {
-            if file_dialog.show(ctx).selected() {
-                self.current_file = Some(file_dialog.path().unwrap())
-            };
+        egui::CentralPanel::default().show(ctx, |ui| {
+            self.ping_map(ui);
+        });
+        match self.file_open_dialog.state() {
+            egui_file::State::Open => {
+                if self.file_open_dialog.show(ctx).selected() {
+                    self.current_file = Some(self.file_open_dialog.path().unwrap())
+                };
+            }
+            egui_file::State::Selected => {
+                self.current_file = Some(self.file_open_dialog.path().unwrap())
+            }
+            _ => {}
         }
+    }
+    fn ping_map(&mut self, ui: &mut egui::Ui) {
+        let size = ui.available_size();
+        let (rect, response) = ui.allocate_exact_size(
+            size,
+            egui::Sense {
+                click: false,
+                drag: true,
+                focusable: true,
+            },
+        );
+        let callback = Arc::new(
+            egui_wgpu::CallbackFn::new()
+                .prepare(|device, queue, encoder, type_map| vec![])
+                .paint(|cb_info, render_pass, type_map| {}),
+        );
+        ui.painter().add(egui::PaintCallback { rect, callback });
     }
 }
