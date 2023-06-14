@@ -1,7 +1,7 @@
 use std::{net::Ipv4Addr, path::Path, sync::Arc, time::Duration};
 
 use bytemuck::{bytes_of, checked::cast_slice};
-use egui::PaintCallbackInfo;
+use egui::{vec2, PaintCallbackInfo, Vec2};
 use ipnet::Ipv4Net;
 use iprange::IpRange;
 use itertools::Itertools;
@@ -24,7 +24,7 @@ pub struct Widget {
     instance_rx: Option<UnboundedReceiver<Instance>>,
     file_reader_handle: Option<JoinHandle<()>>,
     reset_buffers: bool,
-    pan: [f32; 2],
+    pan: Vec2,
     zoom: f32,
 }
 
@@ -35,7 +35,7 @@ impl Widget {
         Self {
             instance_rx: None,
             state_index,
-            pan: [0., 0.],
+            pan: vec2(0., 0.),
             zoom: 1.,
             file_reader_handle: None,
             reset_buffers: false,
@@ -43,47 +43,27 @@ impl Widget {
     }
     pub fn show(&mut self, ui: &mut egui::Ui) {
         let size = ui.available_size();
-        let (rect, response) = ui.allocate_exact_size(
-            size,
-            egui::Sense {
-                click: false,
-                drag: true,
-                focusable: true,
-            },
-        );
-        let mut scale = [
-            1.0f32.min(rect.aspect_ratio().recip()),
-            1.0f32.min(rect.aspect_ratio()),
-        ];
-        let last_zoom = self.zoom;
-        if response.hovered() {
-            self.zoom *= ui.ctx().input(|i| i.zoom_delta());
-            self.zoom *= ui.ctx().input(|i| 1.005f32.powf(i.scroll_delta[1]));
-            self.zoom = self.zoom.max(1.);
-        }
-        scale[0] *= self.zoom;
-        scale[1] *= self.zoom;
-        if let Some(pointer_pos) = ui.ctx().input(|i| i.pointer.hover_pos()) {
-            let factor = self.zoom / last_zoom - 1.;
-            self.pan[0] -= (pointer_pos[0] / rect.width() * 2. - 1.) / scale[0] * factor;
-            self.pan[1] += (pointer_pos[1] / rect.height() * 2. - 1.) / scale[1] * factor;
-        }
-        self.pan[0] += response.drag_delta()[0] / rect.width() * 2. / scale[0];
-        self.pan[1] -= response.drag_delta()[1] / rect.height() * 2. / scale[1];
-        let get_state = self.state_getter_mut();
+        let (rect, response) = ui.allocate_exact_size(size, egui::Sense::click_and_drag());
+
+        let (pan, zoom) = self.calculate_pan_zoom(ui, rect, response);
+
         let mut new_instances = vec![];
-        while let Some(i) = self.instance_rx.as_mut().and_then(|rx| rx.try_recv().ok()) {
-            new_instances.push(i);
+        if let Some(ref mut rx) = self.instance_rx {
+            while let Ok(i) = rx.try_recv() {
+                new_instances.push(i);
+            }
         }
-        let pan = self.pan.clone();
+
         let reset_buffers = self.reset_buffers;
         self.reset_buffers = false;
+
+        let get_state = self.state_getter_mut();
         let prepare = move |device: &Device,
                             queue: &Queue,
                             _encoder: &mut CommandEncoder,
                             type_map: &mut TypeMap| {
             let state = get_state(type_map);
-            state.update_pan_zoom(queue, pan, scale);
+            state.update_pan_zoom(queue, pan, zoom);
             if reset_buffers {
                 state.instance_buffers.clear();
             }
@@ -92,6 +72,7 @@ impl Widget {
             }
             vec![]
         };
+
         ui.painter().add(egui::PaintCallback {
             rect,
             callback: Arc::new(
@@ -101,9 +82,46 @@ impl Widget {
             ),
         });
     }
+    fn calculate_pan_zoom(
+        &mut self,
+        ui: &mut egui::Ui,
+        rect: egui::Rect,
+        response: egui::Response,
+    ) -> ([f32; 2], [f32; 2]) {
+        // scale x or y down to make it render square
+        let mut scale = vec2(
+            1.0f32.min(rect.aspect_ratio().recip()),
+            1.0f32.min(rect.aspect_ratio()),
+        );
+        // save the prev zoom level
+        let last_zoom = self.zoom;
+        // if the cursor is hovering over, then accept zoom inputs
+        if response.hovered() {
+            self.zoom *= ui.ctx().input(|i| i.zoom_delta());
+            self.zoom *= ui.ctx().input(|i| 1.005f32.powf(i.scroll_delta.y));
+            if response.double_clicked() {
+                self.zoom *= 4.;
+            }
+            self.zoom = self.zoom.max(1.);
+        }
+        // apply the zoom to the scale vec
+        scale *= self.zoom;
+        let screen_to_uv = vec2(2., 2.) / rect.size() / scale;
+        // calculate how much to pan to make the zooming centered on the cursor
+        if let Some(pointer_pos) = ui.ctx().input(|i| i.pointer.hover_pos()) {
+            let factor = self.zoom / last_zoom - 1.;
+            self.pan -= (pointer_pos - rect.center()) * factor * screen_to_uv;
+        }
+        // apply pointer dragging to the pan vec
+        self.pan += response.drag_delta() * screen_to_uv;
+        let mut pan = self.pan;
+        // invert y because of coordinate differences
+        pan.y *= -1.;
+        (pan.into(), scale.into())
+    }
     pub fn open_file(&mut self, path: impl AsRef<Path>) {
         self.zoom = 1.;
-        self.pan = [0., 0.];
+        self.pan = vec2(0., 0.);
         if let Some(handle) = self.file_reader_handle.take() {
             handle.abort();
             self.reset_buffers = true;
