@@ -86,10 +86,9 @@ impl Widget {
             state.update_pan_zoom(queue, pan, scale);
             if reset_buffers {
                 state.instance_buffers.clear();
-            } else {
-                if new_instances.len() > 0 {
-                    state.update_instances(device, queue, &new_instances);
-                }
+            }
+            if new_instances.len() > 0 {
+                state.update_instances(device, queue, &new_instances);
             }
             vec![]
         };
