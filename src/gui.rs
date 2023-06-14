@@ -6,16 +6,14 @@ use egui_wgpu::Renderer;
 use crate::{gpu::GpuState, ping_map};
 
 pub struct UiState {
-    file_open_dialog: Option<egui_file::FileDialog>,
-    current_file: Option<PathBuf>,
+    file_open_dialog: FileDialog,
     ping_map: ping_map::Widget,
 }
 impl UiState {
     pub fn new(gpu: &GpuState, egui_renderer: &mut Renderer) -> Self {
         let ping_map = ping_map::Widget::new(gpu, egui_renderer);
         Self {
-            file_open_dialog: None,
-            current_file: None,
+            file_open_dialog: FileDialog::new(),
             ping_map,
         }
     }
@@ -25,10 +23,10 @@ impl UiState {
                 ui.menu_button("File", |ui| {
                     if ui.button("Open...").clicked() {
                         ui.close_menu();
-                        self.open_file_open_dialog();
+                        self.file_open_dialog.open();
                     }
                 });
-                if let Some(ref path) = self.current_file {
+                if let Some(ref path) = self.file_open_dialog.path {
                     ui.label(format!(
                         "Current File: {:?}",
                         path.file_name().unwrap().to_str().unwrap()
@@ -39,27 +37,37 @@ impl UiState {
         egui::CentralPanel::default().show(ctx, |ui| {
             self.ping_map.show(ui);
         });
-        if let Some(ref mut dialog) = self.file_open_dialog {
-            match dialog.state() {
-                egui_file::State::Open => {
-                    dialog.show(ctx);
-                }
-                egui_file::State::Selected => {
-                    let path = dialog.path().unwrap();
-                    self.current_file = Some(path.clone());
-                    self.ping_map.open_file(path);
-                    self.file_open_dialog.take();
-                }
-                _ => {}
-            }
+        if self.file_open_dialog.show(ctx).just_selected {
+            self.ping_map
+                .open_file(self.file_open_dialog.path.as_ref().unwrap());
         }
     }
-    fn open_file_open_dialog(&mut self) {
-        let mut file_open_dialog =
-            egui_file::FileDialog::open_file(None).filter(Box::new(|path: &Path| {
-                path.extension().is_some_and(|s| s == "ping")
-            }));
-        file_open_dialog.open();
-        self.file_open_dialog = Some(file_open_dialog);
+}
+
+struct FileDialog {
+    dialog: egui_file::FileDialog,
+    path: Option<PathBuf>,
+    just_selected: bool,
+}
+impl FileDialog {
+    fn new() -> Self {
+        let filter = |path: &Path| path.extension().is_some_and(|s| s == "ping");
+        let dialog = egui_file::FileDialog::open_file(None).filter(Box::new(filter));
+        Self {
+            dialog,
+            path: None,
+            just_selected: false,
+        }
+    }
+    fn show(&mut self, ctx: &Context) -> &mut Self {
+        self.just_selected = false;
+        if self.dialog.show(ctx).selected() {
+            self.just_selected = true;
+            self.path = self.dialog.path()
+        };
+        self
+    }
+    fn open(&mut self) {
+        self.dialog.open();
     }
 }
