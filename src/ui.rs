@@ -1,26 +1,16 @@
-use std::{
-    iter,
-    path::{Path, PathBuf},
-    sync::Arc,
-    time::Duration,
-};
+use std::{iter, path::Path, time::Duration};
 
-use egui::Context;
 use ipnet::Ipv4Net;
 use iprange::IpRange;
 use itertools::Itertools;
 use tokio::{
     fs::File,
     io::{AsyncReadExt, BufReader},
-    sync::mpsc::{UnboundedReceiver, UnboundedSender},
+    sync::mpsc::UnboundedSender,
 };
-use wgpu::*;
-use winit::{event::WindowEvent, event_loop::ControlFlow, window::Window};
+use winit::{event::WindowEvent, event_loop::ControlFlow};
 
-use crate::{
-    gpu::GpuState,
-    view::ping_map::{Instance, PingMapState, Vertex},
-};
+use crate::{gpu::GpuState, gui::UiState, ping_map::Instance};
 
 const INITIAL_WIDTH: u32 = 1920;
 const INITIAL_HEIGHT: u32 = 1080;
@@ -48,10 +38,8 @@ pub async fn main() {
     );
     let egui_ctx = egui::Context::default();
 
-    let mut ui_state = UiState::new();
     let (instance_tx, instance_rx) = tokio::sync::mpsc::unbounded_channel::<Instance>();
-    let render_state = RenderState::new(&gpu, instance_rx).await;
-    egui_renderer.paint_callback_resources.insert(render_state);
+    let mut ui_state = UiState::new(&gpu, &mut egui_renderer, instance_rx);
     tokio::spawn(file_reader("0.0.0.0-0.ping", instance_tx));
 
     event_loop.run(move |event, _, control_flow| match event {
@@ -156,151 +144,4 @@ fn range_from_path(path: impl AsRef<Path>) -> IpRange<Ipv4Net> {
     }
     range.simplify();
     range
-}
-struct UiState {
-    file_open_dialog: egui_file::FileDialog,
-    current_file: Option<PathBuf>,
-}
-impl UiState {
-    fn new() -> Self {
-        let file_dialog_filter =
-            Box::new(|path: &Path| path.extension().is_some_and(|s| s == "ping"));
-        let file_open_dialog = egui_file::FileDialog::open_file(None).filter(file_dialog_filter);
-        Self {
-            file_open_dialog,
-            current_file: None,
-        }
-    }
-    fn run(&mut self, ctx: &Context) {
-        egui::TopBottomPanel::top("menu_bar").show(ctx, |ui| {
-            ui.horizontal(|ui| {
-                ui.menu_button("File", |ui| {
-                    if ui.button("Open...").clicked() {
-                        ui.close_menu();
-                        self.file_open_dialog.open();
-                    }
-                });
-                ui.label(format!("Current File: {:?}", self.current_file));
-            })
-        });
-        egui::CentralPanel::default().show(ctx, |ui| {
-            self.ping_map(ui);
-        });
-        match self.file_open_dialog.state() {
-            egui_file::State::Open => {
-                if self.file_open_dialog.show(ctx).selected() {
-                    self.current_file = Some(self.file_open_dialog.path().unwrap())
-                };
-            }
-            egui_file::State::Selected => {
-                self.current_file = Some(self.file_open_dialog.path().unwrap())
-            }
-            _ => {}
-        }
-    }
-    fn ping_map(&mut self, ui: &mut egui::Ui) {
-        let size = ui.available_size();
-        let (rect, response) = ui.allocate_exact_size(
-            size,
-            egui::Sense {
-                click: false,
-                drag: true,
-                focusable: true,
-            },
-        );
-        // let zoom_delta = ui.ctx().input(|i| i.zoom_delta());
-        let callback = Arc::new(
-            egui_wgpu::CallbackFn::new()
-                .prepare(|device, queue, encoder, type_map| {
-                    let r = type_map.get_mut::<RenderState>().unwrap();
-                    r.prepare(device, queue, encoder);
-                    vec![]
-                })
-                .paint(|cb_info, render_pass, type_map| {
-                    let r = type_map.get::<RenderState>().unwrap();
-                    r.paint(render_pass);
-                }),
-        );
-        ui.painter().add(egui::PaintCallback { rect, callback });
-    }
-}
-
-struct RenderState {
-    ping_map: PingMapState,
-    render_pipeline: RenderPipeline,
-}
-impl RenderState {
-    async fn new(gpu: &GpuState, instance_rx: UnboundedReceiver<Instance>) -> Self {
-        let ping_map = PingMapState::new(&gpu, instance_rx);
-
-        let shader_module = gpu
-            .device
-            .create_shader_module(include_wgsl!("view/shader.wgsl"));
-
-        let pipeline_layout_desc = PipelineLayoutDescriptor {
-            label: Some("Render Pipeline Layout"),
-            bind_group_layouts: &[],
-            // bind_group_layouts: &[&pan_zoom.bind_group_layout],
-            push_constant_ranges: &[],
-        };
-        let render_pipeline_layout = gpu.device.create_pipeline_layout(&pipeline_layout_desc);
-
-        let vertex_state = VertexState {
-            module: &shader_module,
-            entry_point: "vs_main",
-            buffers: &[Vertex::desc(), Instance::desc()],
-        };
-        let primitive_state = PrimitiveState {
-            topology: PrimitiveTopology::TriangleList,
-            strip_index_format: None,
-            front_face: FrontFace::Ccw,
-            cull_mode: None,
-            unclipped_depth: false,
-            polygon_mode: PolygonMode::Fill,
-            conservative: false,
-        };
-        let fragment_state = FragmentState {
-            module: &shader_module,
-            entry_point: "fs_main",
-            targets: &[Some(ColorTargetState {
-                format: gpu.surface_config.format,
-                blend: Some(BlendState::REPLACE),
-                write_mask: ColorWrites::ALL,
-            })],
-        };
-        let multisample_state = MultisampleState {
-            count: gpu.sample_count,
-            mask: !0,
-            alpha_to_coverage_enabled: false,
-        };
-        let render_pipeline_desc = RenderPipelineDescriptor {
-            label: Some("Render Pipeline"),
-            layout: Some(&render_pipeline_layout),
-            vertex: vertex_state,
-            fragment: Some(fragment_state),
-            primitive: primitive_state,
-            depth_stencil: None,
-            multisample: multisample_state,
-            multiview: None,
-        };
-        let render_pipeline = gpu.device.create_render_pipeline(&render_pipeline_desc);
-
-        Self {
-            ping_map,
-            render_pipeline,
-        }
-    }
-    fn prepare(&mut self, device: &Device, queue: &Queue, encoder: &mut CommandEncoder) {
-        self.ping_map.prepare(device);
-    }
-    fn paint<'a>(&'a self, render_pass: &mut RenderPass<'a>) {
-        render_pass.set_pipeline(&self.render_pipeline);
-        // render_pass.set_bind_group(0, &self.pan_zoom.bind_group, &[]);
-        render_pass.set_index_buffer(self.ping_map.index_buffer.slice(..), IndexFormat::Uint16);
-        render_pass.set_vertex_buffer(0, self.ping_map.vertex_buffer.slice(..));
-        for (len, buffer) in &self.ping_map.instance_buffers {
-            render_pass.set_vertex_buffer(1, buffer.slice(..));
-            render_pass.draw_indexed(0..self.ping_map.indicies.len() as _, 0, 0..*len as _);
-        }
-    }
 }

@@ -4,6 +4,8 @@ mod ping;
 mod view;
 mod ui;
 mod gpu;
+mod gui;
+mod ping_map;
 
 #[tokio::main]
 async fn main() {

@@ -11,14 +11,14 @@ pub struct PanZoomState {
     pub uniform: PanZoomUniform,
     zoom: f32,
     aspect: f32,
-    pub buffer: Buffer,
-    pub bind_group: BindGroup,
-    pub bind_group_layout: BindGroupLayout,
     mouse_down: bool,
     last_position: Option<(f64, f64)>,
     modified: bool,
     addr_rx: Receiver<u32>,
     follow_mode: bool,
+    pub buffer: Buffer,
+    pub bind_group: BindGroup,
+    pub bind_group_layout: BindGroupLayout,
 }
 impl PanZoomState {
     pub fn new(gpu: &gpu::GpuState, addr_rx: Receiver<u32>) -> Self {

@@ -12,8 +12,8 @@ struct PanZoomUniform {
     pan: vec2<f32>,
     zoom: vec2<f32>
 }
-// @group(0) @binding(0)
-// var<uniform> pan_zoom: PanZoomUniform;
+@group(0) @binding(0)
+var<uniform> pan_zoom: PanZoomUniform;
 
 @vertex
 fn vs_main(
@@ -22,8 +22,8 @@ fn vs_main(
 ) -> VertexOutput {
     var vertex = vertex;
     vertex += addr_to_coords(instance.address);
-    // vertex += pan_zoom.pan;
-    // vertex *= pan_zoom.zoom;
+    vertex += pan_zoom.pan;
+    vertex *= pan_zoom.zoom;
     var out: VertexOutput;
     out.color = color_from_u32(instance.color);
     out.clip_position = vec4<f32>(vertex, 1., 1.);
