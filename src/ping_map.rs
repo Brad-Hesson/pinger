@@ -1,8 +1,16 @@
-use std::{net::Ipv4Addr, sync::Arc};
+use std::{net::Ipv4Addr, path::Path, sync::Arc, time::Duration};
 
 use bytemuck::{bytes_of, checked::cast_slice};
 use egui::PaintCallbackInfo;
-use tokio::sync::mpsc::UnboundedReceiver;
+use ipnet::Ipv4Net;
+use iprange::IpRange;
+use itertools::Itertools;
+use tokio::{
+    fs::File,
+    io::{AsyncReadExt, BufReader},
+    sync::mpsc::{UnboundedReceiver, UnboundedSender},
+    task::JoinHandle,
+};
 use type_map::concurrent::TypeMap;
 use wgpu::{
     util::{BufferInitDescriptor, DeviceExt},
@@ -13,24 +21,24 @@ use crate::gpu::GpuState;
 
 pub struct Widget {
     state_index: usize,
-    instance_rx: UnboundedReceiver<Instance>,
+    instance_rx: Option<UnboundedReceiver<Instance>>,
+    file_reader_handle: Option<JoinHandle<()>>,
+    reset_buffers: bool,
     pan: [f32; 2],
     zoom: f32,
 }
 
 impl Widget {
-    pub fn new(
-        gpu: &GpuState,
-        egui_renderer: &mut egui_wgpu::Renderer,
-        instance_rx: UnboundedReceiver<Instance>,
-    ) -> Self {
+    pub fn new(gpu: &GpuState, egui_renderer: &mut egui_wgpu::Renderer) -> Self {
         let state = State::new(gpu);
         let state_index = Self::insert_state(&mut egui_renderer.paint_callback_resources, state);
         Self {
-            instance_rx,
+            instance_rx: None,
             state_index,
             pan: [0., 0.],
             zoom: 1.,
+            file_reader_handle: None,
+            reset_buffers: false,
         }
     }
     pub fn show(&mut self, ui: &mut egui::Ui) {
@@ -64,18 +72,24 @@ impl Widget {
         self.pan[1] -= response.drag_delta()[1] / rect.height() * 2. / scale[1];
         let get_state = self.state_getter_mut();
         let mut new_instances = vec![];
-        while let Ok(i) = self.instance_rx.try_recv() {
+        while let Some(i) = self.instance_rx.as_mut().and_then(|rx| rx.try_recv().ok()) {
             new_instances.push(i);
         }
         let pan = self.pan.clone();
+        let reset_buffers = self.reset_buffers;
+        self.reset_buffers = false;
         let prepare = move |device: &Device,
                             queue: &Queue,
                             _encoder: &mut CommandEncoder,
                             type_map: &mut TypeMap| {
             let state = get_state(type_map);
             state.update_pan_zoom(queue, pan, scale);
-            if new_instances.len() > 0 {
-                state.update_instances(device, queue, &new_instances);
+            if reset_buffers {
+                state.instance_buffers.clear();
+            } else {
+                if new_instances.len() > 0 {
+                    state.update_instances(device, queue, &new_instances);
+                }
             }
             vec![]
         };
@@ -87,6 +101,18 @@ impl Widget {
                     .paint(self.paint_fn()),
             ),
         });
+    }
+    pub fn open_file(&mut self, path: impl AsRef<Path>) {
+        self.zoom = 1.;
+        self.pan = [0., 0.];
+        if let Some(handle) = self.file_reader_handle.take() {
+            handle.abort();
+            self.reset_buffers = true;
+        }
+        let (tx, rx) = tokio::sync::mpsc::unbounded_channel();
+        self.instance_rx = Some(rx);
+        let handle = tokio::spawn(file_reader(path.as_ref().to_path_buf(), tx));
+        self.file_reader_handle = Some(handle);
     }
     fn paint_fn(
         &self,
@@ -127,6 +153,17 @@ struct State {
 impl State {
     fn update_instances(&mut self, device: &Device, queue: &Queue, mut instances: &[Instance]) {
         const INSTANCE_SIZE: BufferAddress = std::mem::size_of::<Instance>() as _;
+        if self.instance_buffers.is_empty() {
+            self.instance_buffers.push((
+                device.create_buffer(&BufferDescriptor {
+                    label: Some("Instance Buffer 0"),
+                    size: self.max_buffer_size,
+                    usage: BufferUsages::COPY_DST | BufferUsages::VERTEX,
+                    mapped_at_creation: false,
+                }),
+                0,
+            ))
+        }
         loop {
             let (buffer, num_occupied) = self.instance_buffers.last_mut().unwrap();
             let remaining_slots = (self.max_buffer_size / INSTANCE_SIZE) as usize - *num_occupied;
@@ -167,7 +204,7 @@ impl State {
         let max_buffer_size = gpu.device.limits().max_buffer_size;
         let shader_module = gpu
             .device
-            .create_shader_module(include_wgsl!("view/shader.wgsl"));
+            .create_shader_module(include_wgsl!("shader.wgsl"));
         let pan_zoom_buffer = gpu.device.create_buffer_init(&BufferInitDescriptor {
             label: Some("Pan Zoom Buffer"),
             contents: bytes_of(&PanZoomUniform::default()),
@@ -183,15 +220,7 @@ impl State {
             contents: bytemuck::cast_slice(INDICES),
             usage: BufferUsages::INDEX,
         });
-        let instance_buffers = vec![(
-            gpu.device.create_buffer(&BufferDescriptor {
-                label: Some("Instance Buffer 0"),
-                size: max_buffer_size,
-                usage: BufferUsages::COPY_DST | BufferUsages::VERTEX,
-                mapped_at_creation: false,
-            }),
-            0,
-        )];
+        let instance_buffers = vec![];
         let pan_zoom_bind_group_layout =
             gpu.device
                 .create_bind_group_layout(&BindGroupLayoutDescriptor {
@@ -271,6 +300,44 @@ impl State {
             max_buffer_size,
         }
     }
+}
+
+async fn file_reader(path: impl AsRef<Path>, instance_tx: UnboundedSender<Instance>) {
+    let file = File::open(&path).await.unwrap();
+    let mut buf_reader = BufReader::new(file);
+    let nets = range_from_path(path).iter().collect_vec();
+    let instances = nets.iter().flat_map(|net| net.hosts()).map(Instance::from);
+    let poll_dur = Duration::from_millis(10);
+    for mut instance in instances {
+        let val = read_f32_wait(&mut buf_reader, poll_dur).await.unwrap();
+        if val >= 0. {
+            let color = (val / 0.5 * 255.).clamp(0., 255.) as u8;
+            instance.color = u32::from_be_bytes([color, 255 - color, 255 - color, 255]);
+            instance_tx.send(instance).unwrap()
+        }
+    }
+}
+
+async fn read_f32_wait(buf_reader: &mut BufReader<File>, dur: Duration) -> std::io::Result<f32> {
+    loop {
+        match buf_reader.read_f32().await {
+            Ok(val) => return Ok(val),
+            Err(e) if e.kind() != std::io::ErrorKind::UnexpectedEof => return Err(e),
+            _ => {}
+        }
+        tokio::time::sleep(dur).await;
+    }
+}
+
+fn range_from_path(path: impl AsRef<Path>) -> IpRange<Ipv4Net> {
+    let filename = path.as_ref().file_stem().unwrap().to_str().unwrap();
+    let mut range = IpRange::<Ipv4Net>::new();
+    for s in filename.split('_') {
+        let s = s.replace('-', "/").parse().unwrap();
+        range.add(s);
+    }
+    range.simplify();
+    range
 }
 
 #[repr(C)]
