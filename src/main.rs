@@ -1,10 +1,9 @@
 use clap::Parser;
 
-mod ping;
-mod ui;
 mod gpu;
-mod gui;
+mod ping;
 mod ping_map;
+mod ui;
 
 #[tokio::main]
 async fn main() {

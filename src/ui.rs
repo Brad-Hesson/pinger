@@ -1,8 +1,12 @@
-use std::iter;
+use std::{
+    iter,
+    path::{Path, PathBuf},
+};
 
 use winit::{event::WindowEvent, event_loop::ControlFlow};
 
-use crate::{gpu::GpuState, gui::UiState};
+use crate::gpu::GpuState;
+use crate::ping_map;
 
 const INITIAL_WIDTH: u32 = 1920;
 const INITIAL_HEIGHT: u32 = 1080;
@@ -21,6 +25,7 @@ pub async fn main() {
     let mut gpu = GpuState::new(&window).await;
 
     let mut egui_platform = egui_winit::State::new(&window);
+    egui_platform.set_pixels_per_point(window.scale_factor() as f32);
     let mut egui_renderer = egui_wgpu::Renderer::new(
         &gpu.device,
         gpu.surface_config.format,
@@ -95,4 +100,80 @@ pub async fn main() {
         }
         _ => {}
     })
+}
+
+pub struct UiState {
+    file_open_dialog: FileDialog,
+    ping_map: ping_map::Widget,
+}
+impl UiState {
+    pub fn new(gpu: &GpuState, egui_renderer: &mut egui_wgpu::Renderer) -> Self {
+        let ping_map = ping_map::Widget::new(gpu, egui_renderer);
+        Self {
+            file_open_dialog: FileDialog::new(),
+            ping_map,
+        }
+    }
+    pub fn run(&mut self, ctx: &egui::Context) {
+        egui::TopBottomPanel::top("menu_bar").show(ctx, |ui| {
+            ui.horizontal(|ui| {
+                ui.menu_button("File", |ui| {
+                    if ui.button("Open...").clicked() {
+                        ui.close_menu();
+                        self.file_open_dialog.open();
+                    }
+                });
+                if let Some(ref path) = self.file_open_dialog.path {
+                    ui.label(format!(
+                        "Current File: {:?}",
+                        path.file_name().unwrap().to_str().unwrap()
+                    ));
+                }
+            })
+        });
+        egui::CentralPanel::default()
+            .frame(egui::Frame {
+                inner_margin: egui::Margin::same(0.),
+                outer_margin: egui::Margin::same(0.),
+                rounding: egui::Rounding::none(),
+                shadow: egui::epaint::Shadow::NONE,
+                fill: egui::Color32::TRANSPARENT,
+                stroke: egui::Stroke::NONE,
+            })
+            .show(ctx, |ui| {
+                self.ping_map.show(ui);
+            });
+        if self.file_open_dialog.show(ctx).just_selected {
+            self.ping_map
+                .open_file(self.file_open_dialog.path.as_ref().unwrap());
+        }
+    }
+}
+
+struct FileDialog {
+    dialog: egui_file::FileDialog,
+    path: Option<PathBuf>,
+    just_selected: bool,
+}
+impl FileDialog {
+    fn new() -> Self {
+        let filter = |path: &Path| path.extension().is_some_and(|s| s == "ping");
+        let dialog = egui_file::FileDialog::open_file(None).filter(Box::new(filter));
+        Self {
+            dialog,
+            path: None,
+            just_selected: false,
+        }
+    }
+    fn show(&mut self, ctx: &egui::Context) -> &mut Self {
+        self.just_selected = false;
+        if self.dialog.show(ctx).selected() {
+            self.just_selected = true;
+            self.path = self.dialog.path()
+        };
+        self
+    }
+    fn open(&mut self) {
+        self.dialog.open();
+    }
 }
