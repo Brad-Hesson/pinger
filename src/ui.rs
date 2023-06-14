@@ -47,12 +47,12 @@ pub async fn main() {
             }
             match event {
                 WindowEvent::Resized(size) => {
-                    gpu.resize(&size);
-                    window.request_redraw()
+                    gpu.resize(size);
+                    window.request_redraw();
                 }
                 WindowEvent::ScaleFactorChanged { new_inner_size, .. } => {
-                    gpu.resize(&new_inner_size);
-                    window.request_redraw()
+                    gpu.resize(*new_inner_size);
+                    window.request_redraw();
                 }
                 WindowEvent::CloseRequested => {
                     *control_flow = ControlFlow::Exit;
@@ -169,7 +169,7 @@ impl FileDialog {
         self.just_selected = false;
         if self.dialog.show(ctx).selected() {
             self.just_selected = true;
-            self.path = self.dialog.path()
+            self.path = self.dialog.path();
         };
         self
     }
