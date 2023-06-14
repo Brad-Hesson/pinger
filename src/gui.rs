@@ -1,6 +1,6 @@
 use std::path::{Path, PathBuf};
 
-use egui::Context;
+use egui::{epaint::Shadow, Color32, Context, Margin, Rounding, Stroke};
 use egui_wgpu::Renderer;
 
 use crate::{gpu::GpuState, ping_map};
@@ -34,9 +34,18 @@ impl UiState {
                 }
             })
         });
-        egui::CentralPanel::default().show(ctx, |ui| {
-            self.ping_map.show(ui);
-        });
+        egui::CentralPanel::default()
+            .frame(egui::Frame {
+                inner_margin: Margin::same(0.),
+                outer_margin: Margin::same(0.),
+                rounding: Rounding::none(),
+                shadow: Shadow::NONE,
+                fill: Color32::TRANSPARENT,
+                stroke: Stroke::NONE,
+            })
+            .show(ctx, |ui| {
+                self.ping_map.show(ui);
+            });
         if self.file_open_dialog.show(ctx).just_selected {
             self.ping_map
                 .open_file(self.file_open_dialog.path.as_ref().unwrap());
