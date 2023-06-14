@@ -14,6 +14,8 @@ use crate::gpu::GpuState;
 pub struct Widget {
     state_index: usize,
     instance_rx: UnboundedReceiver<Instance>,
+    pan: [f32; 2],
+    zoom: f32,
 }
 
 impl Widget {
@@ -27,11 +29,13 @@ impl Widget {
         Self {
             instance_rx,
             state_index,
+            pan: [0., 0.],
+            zoom: 1.,
         }
     }
     pub fn show(&mut self, ui: &mut egui::Ui) {
         let size = ui.available_size();
-        let (rect, _response) = ui.allocate_exact_size(
+        let (rect, response) = ui.allocate_exact_size(
             size,
             egui::Sense {
                 click: false,
@@ -39,18 +43,37 @@ impl Widget {
                 focusable: true,
             },
         );
-        // let zoom_delta = ui.ctx().input(|i| i.zoom_delta());
+        let mut scale = [
+            1.0f32.min(rect.aspect_ratio().recip()),
+            1.0f32.min(rect.aspect_ratio()),
+        ];
+        let last_zoom = self.zoom;
+        if response.hovered() {
+            self.zoom *= ui.ctx().input(|i| i.zoom_delta());
+            self.zoom *= ui.ctx().input(|i| 1.005f32.powf(i.scroll_delta[1]));
+            self.zoom = self.zoom.max(1.);
+        }
+        scale[0] *= self.zoom;
+        scale[1] *= self.zoom;
+        if let Some(pointer_pos) = ui.ctx().input(|i| i.pointer.hover_pos()) {
+            let factor = self.zoom / last_zoom - 1.;
+            self.pan[0] -= (pointer_pos[0] / rect.width() * 2. - 1.) / scale[0] * factor;
+            self.pan[1] += (pointer_pos[1] / rect.height() * 2. - 1.) / scale[1] * factor;
+        }
+        self.pan[0] += response.drag_delta()[0] / rect.width() * 2. / scale[0];
+        self.pan[1] -= response.drag_delta()[1] / rect.height() * 2. / scale[1];
         let get_state = self.state_getter_mut();
         let mut new_instances = vec![];
         while let Ok(i) = self.instance_rx.try_recv() {
             new_instances.push(i);
         }
+        let pan = self.pan.clone();
         let prepare = move |device: &Device,
                             queue: &Queue,
                             _encoder: &mut CommandEncoder,
                             type_map: &mut TypeMap| {
             let state = get_state(type_map);
-            state.update_pan_zoom(queue, [0., 0.], [1., 1.]);
+            state.update_pan_zoom(queue, pan, scale);
             if new_instances.len() > 0 {
                 state.update_instances(device, queue, &new_instances);
             }
