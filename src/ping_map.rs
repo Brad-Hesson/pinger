@@ -182,7 +182,7 @@ impl State {
         render_pass.set_bind_group(0, &self.pan_zoom_bind_group, &[]);
         render_pass.set_index_buffer(self.index_buffer.slice(..), IndexFormat::Uint16);
         render_pass.set_vertex_buffer(0, self.vertex_buffer.slice(..));
-        for (buffer, num_occupied) in self.instance_buffers.iter() {
+        for (buffer, num_occupied) in &self.instance_buffers {
             render_pass.set_vertex_buffer(1, buffer.slice(..));
             render_pass.draw_indexed(0..INDICES.len() as _, 0, 0..*num_occupied as _);
         }

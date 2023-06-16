@@ -61,3 +61,12 @@ impl<T> BufferVec<T> {
         self.instance_buffers.clear()
     }
 }
+impl<'a, T> IntoIterator for &'a BufferVec<T> {
+    type Item = &'a (Buffer, usize);
+
+    type IntoIter = Iter<'a, (Buffer, usize)>;
+
+    fn into_iter(self) -> Self::IntoIter {
+        self.iter()
+    }
+}
