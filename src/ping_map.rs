@@ -1,6 +1,6 @@
 use std::{net::Ipv4Addr, path::Path, sync::Arc, time::Duration};
 
-use bytemuck::{bytes_of, checked::cast_slice};
+use bytemuck::bytes_of;
 use egui::{vec2, PaintCallbackInfo, Vec2};
 use ipnet::Ipv4Net;
 use iprange::IpRange;
@@ -17,7 +17,7 @@ use wgpu::{
     *,
 };
 
-use crate::gpu::GpuState;
+use crate::{gpu::GpuState, wgpu_ext::BufferVec};
 
 pub struct Widget {
     state_index: usize,
@@ -164,60 +164,32 @@ struct State {
     pan_zoom_bind_group: BindGroup,
     vertex_buffer: Buffer,
     index_buffer: Buffer,
-    instance_buffers: Vec<(Buffer, usize)>,
-    max_buffer_size: BufferAddress,
+    instance_buffers: BufferVec<Instance>,
 }
 impl State {
-    fn update_instances(&mut self, device: &Device, queue: &Queue, mut instances: &[Instance]) {
-        const INSTANCE_SIZE: BufferAddress = std::mem::size_of::<Instance>() as _;
-        if self.instance_buffers.is_empty() {
-            self.instance_buffers.push((
-                device.create_buffer(&BufferDescriptor {
-                    label: Some("Instance Buffer 0"),
-                    size: self.max_buffer_size,
-                    usage: BufferUsages::COPY_DST | BufferUsages::VERTEX,
-                    mapped_at_creation: false,
-                }),
-                0,
-            ));
-        }
-        loop {
-            let (buffer, num_occupied) = self.instance_buffers.last_mut().unwrap();
-            let remaining_slots = (self.max_buffer_size / INSTANCE_SIZE) as usize - *num_occupied;
-            let offset = *num_occupied as BufferAddress * INSTANCE_SIZE;
-            if instances.len() < remaining_slots {
-                queue.write_buffer(buffer, offset, cast_slice(instances));
-                *num_occupied += instances.len();
-                break;
-            }
-            queue.write_buffer(buffer, offset, cast_slice(&instances[..remaining_slots]));
-            *num_occupied += remaining_slots;
-            instances = &instances[remaining_slots..];
-            let new_buffer = device.create_buffer(&BufferDescriptor {
-                label: Some(&format!("Instance Buffer {}", self.instance_buffers.len())),
-                size: self.max_buffer_size,
-                usage: BufferUsages::COPY_DST | BufferUsages::VERTEX,
-                mapped_at_creation: false,
-            });
-            self.instance_buffers.push((new_buffer, 0));
-        }
+    fn update_instances(&mut self, device: &Device, queue: &Queue, instances: &[Instance]) {
+        self.instance_buffers.extend(device, queue, instances);
     }
-    fn update_pan_zoom(&mut self, queue: &Queue, pan: [f32; 2], zoom: [f32; 2]) {
-        let uniform = PanZoomUniform { pan, scale: zoom };
-        queue.write_buffer(&self.pan_zoom_buffer, 0, bytes_of(&uniform));
+    fn update_pan_zoom(&mut self, queue: &Queue, pan: [f32; 2], scale: [f32; 2]) {
+        queue.write_buffer(
+            &self.pan_zoom_buffer,
+            0,
+            bytes_of(&PanZoomUniform { pan, scale }),
+        );
     }
     fn paint<'a>(&'a self, render_pass: &mut RenderPass<'a>) {
         render_pass.set_pipeline(&self.render_pipeline);
         render_pass.set_bind_group(0, &self.pan_zoom_bind_group, &[]);
         render_pass.set_index_buffer(self.index_buffer.slice(..), IndexFormat::Uint16);
         render_pass.set_vertex_buffer(0, self.vertex_buffer.slice(..));
-        for (buffer, num_occupied) in &self.instance_buffers {
+        for (buffer, num_occupied) in self.instance_buffers.iter() {
             render_pass.set_vertex_buffer(1, buffer.slice(..));
             render_pass.draw_indexed(0..INDICES.len() as _, 0, 0..*num_occupied as _);
         }
     }
     fn new(gpu: &GpuState) -> Self {
         let max_buffer_size = gpu.device.limits().max_buffer_size;
+        let instance_buffers = BufferVec::new(max_buffer_size);
         let shader_module = gpu
             .device
             .create_shader_module(include_wgsl!("shader.wgsl"));
@@ -236,7 +208,6 @@ impl State {
             contents: bytemuck::cast_slice(INDICES),
             usage: BufferUsages::INDEX,
         });
-        let instance_buffers = vec![];
         let pan_zoom_bind_group_layout =
             gpu.device
                 .create_bind_group_layout(&BindGroupLayoutDescriptor {
@@ -313,7 +284,6 @@ impl State {
             vertex_buffer,
             index_buffer,
             instance_buffers,
-            max_buffer_size,
         }
     }
 }
