@@ -1,6 +1,7 @@
 use std::{marker::PhantomData, slice::Iter};
 
 use bytemuck::cast_slice;
+use tracing::Level;
 use wgpu::{Buffer, BufferAddress, BufferDescriptor, BufferUsages, Device, Queue};
 
 pub struct BufferVec<T> {
@@ -34,6 +35,8 @@ impl<T> BufferVec<T> {
     where
         T: bytemuck::Pod,
     {
+        let span = tracing::span!(Level::TRACE, "Extend Buffers");
+        let _span = span.enter();
         if self.instance_buffers.is_empty() {
             self.push_new_buffer(device);
         }

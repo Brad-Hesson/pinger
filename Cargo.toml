@@ -20,7 +20,9 @@ itertools = "0.10.5"
 surge-ping = { path = "../surge-ping" }
 tokio = { version = "1.28.0", features = ["full"] }
 tracing = "0.1.37"
+tracing-chrome = "0.7.1"
 tracing-subscriber = "0.3.17"
+tracing-tree = "0.2.3"
 type-map = "0.5.0"
 wgpu = { version = "0.16.1", features = ["trace"] }
 winit = "0.28.6"

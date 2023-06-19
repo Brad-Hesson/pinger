@@ -3,6 +3,7 @@ use std::{
     path::{Path, PathBuf},
 };
 
+use tracing::Level;
 use winit::{event::WindowEvent, event_loop::ControlFlow};
 
 use crate::gpu::GpuState;
@@ -61,6 +62,8 @@ pub async fn main() {
             };
         }
         winit::event::Event::RedrawRequested(..) => {
+            let span = tracing::span!(Level::TRACE, "Render Frame");
+            let _span = span.enter();
             let Ok((surface, view)) = gpu.get_surface_texture() else {
                 return
             };
