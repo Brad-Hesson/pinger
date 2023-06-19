@@ -4,6 +4,7 @@ mod gpu;
 mod ping;
 mod ping_map;
 mod ui;
+mod wgpu_ext;
 
 #[tokio::main]
 async fn main() {

@@ -14,7 +14,7 @@ impl GpuState {
     pub async fn new(window: &Window) -> Self {
         let instance = Instance::new(InstanceDescriptor {
             backends: Backends::all(),
-            dx12_shader_compiler: Default::default(),
+            dx12_shader_compiler: Dx12Compiler::default(),
         });
 
         let surface = unsafe { instance.create_surface(window) }.unwrap();
@@ -44,7 +44,7 @@ impl GpuState {
             .formats
             .iter()
             .copied()
-            .find(|f| f.is_srgb())
+            .find(TextureFormat::is_srgb)
             .unwrap_or(surface_caps.formats[0]);
         let mut sample_count = 16;
         while !adapter
@@ -96,7 +96,7 @@ impl GpuState {
             })
             .create_view(&TextureViewDescriptor::default())
     }
-    pub fn resize(&mut self, size: &PhysicalSize<u32>) {
+    pub fn resize(&mut self, size: PhysicalSize<u32>) {
         if size.height * size.width == 0 {
             return;
         }
