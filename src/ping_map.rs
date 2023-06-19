@@ -11,7 +11,6 @@ use tokio::{
     sync::mpsc::{UnboundedReceiver, UnboundedSender},
     task::JoinHandle,
 };
-use tracing::Level;
 use type_map::concurrent::TypeMap;
 use wgpu::{
     util::{BufferInitDescriptor, DeviceExt},
@@ -63,7 +62,7 @@ impl Widget {
                             queue: &Queue,
                             _encoder: &mut CommandEncoder,
                             type_map: &mut TypeMap| {
-            let span = tracing::span!(Level::TRACE, "Prepare Pingmap");
+            let span = tracing::trace_span!("Prepare Pingmap");
             let _span = span.enter();
             let state = get_state(type_map);
             state.update_pan_zoom(queue, pan, zoom);
@@ -139,7 +138,7 @@ impl Widget {
     ) -> impl for<'a> Fn(PaintCallbackInfo, &mut wgpu::RenderPass<'a>, &'a TypeMap) {
         let get_state = self.state_getter();
         move |_, render_pass, type_map| {
-            let span = tracing::span!(Level::TRACE, "Paint Pingmap");
+            let span = tracing::trace_span!("Paint Pingmap");
             let _span = span.enter();
             get_state(type_map).paint(render_pass);
         }
@@ -293,9 +292,8 @@ impl State {
     }
 }
 
+#[tracing::instrument(skip_all)]
 async fn file_reader(path: impl AsRef<Path>, instance_tx: UnboundedSender<Instance>) {
-    let span = tracing::span!(Level::TRACE, "Read File");
-    let _span = span.enter();
     let file = File::open(&path).await.unwrap();
     let mut buf_reader = BufReader::new(file);
     let nets = range_from_path(path).iter().collect_vec();
