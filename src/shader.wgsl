@@ -8,14 +8,24 @@ struct PanZoomUniform {
     zoom: vec2<f32>
 }
 
+struct BlockVertexOutput {
+    @builtin(position) clip_position: vec4<f32>,
+    @location(1) texel: u32
+}
+
+struct Instance {
+    @location(0) address: u32,
+    @location(1) texel: u32
+}
+
 @group(0) @binding(0)
 var<uniform> bits_per_block: u32;
 
 @group(1) @binding(0)
-var<uniform> block_index: u32;
+var<uniform> pan_zoom: PanZoomUniform;
 
 @group(2) @binding(0)
-var<uniform> pan_zoom: PanZoomUniform;
+var<uniform> block_index: u32;
 
 @group(3) @binding(0)
 var texture: texture_2d<u32>;
@@ -26,9 +36,12 @@ fn block_bits() -> u32 {return 16u - bits_per_block;}
 
 @vertex
 fn vs_main(@builtin(vertex_index) vertex_index: u32) -> VertexOutput {
+    var coords = vec2<f32>(addr_to_coords(block_index, block_bits()));
+    coords *= 2. / f32(1u << block_bits());
+    coords -= 1.;
     var vertex = vertex_from_index(vertex_index);
     vertex /= f32(total_width() / block_width());
-    vertex += addr_to_coords(block_index, block_bits());
+    vertex += coords;
     vertex += f32(block_width()) / f32(total_width());
     vertex += pan_zoom.pan;
     vertex *= pan_zoom.zoom;
@@ -54,7 +67,25 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
     );
 }
 
-fn addr_to_coords(d: u32, bits: u32) -> vec2<f32> {
+@vertex
+fn vs_block(instance: Instance, @builtin(vertex_index) vertex_index: u32) -> BlockVertexOutput {
+    var coords_u = addr_to_coords(instance.address, 16u) % block_width();
+    let coords = (vec2<f32>(coords_u) + 0.5) / f32(block_width()) * 2. - 1.;
+    var vertex = vertex_from_index(vertex_index);
+    vertex /= f32(total_width());
+    vertex += coords;
+    var out: BlockVertexOutput;
+    out.clip_position = vec4<f32>(vertex, 1., 1.);
+    out.texel = instance.texel;
+    return out;
+}
+
+@fragment
+fn fs_block(in: BlockVertexOutput) -> @location(0) u32 {
+    return in.texel;
+}
+
+fn addr_to_coords(d: u32, bits: u32) -> vec2<u32> {
     var out = vec2<u32>(0u, 0u);
     var d = d;
     for (var s: u32 = 1u ; s < (1u << bits); s <<= 1u) {
@@ -72,23 +103,8 @@ fn addr_to_coords(d: u32, bits: u32) -> vec2<f32> {
         out |= s * r;
         d >>= 2u;
     }
-    // if (bits % 2u) == 1u {
-    //     let tmp = out.x;
-    //     out.x = out.y;
-    //     out.y = tmp;
-    // }
-    return vec2<f32>(out) * 2. / f32(1u << bits) - 1.;
+    return out;
 }
-
-fn color_from_u32(color: u32) -> vec4<f32> {
-    return vec4<f32>(
-        f32((color >> 24u) & 0xFFu),
-        f32((color >> 16u) & 0xFFu),
-        f32((color >> 8u) & 0xFFu),
-        f32((color >> 0u) & 0xFFu),
-    ) / 255.;
-}
-
 
 fn vertex_from_index(index: u32) -> vec2<f32> {
     switch index {

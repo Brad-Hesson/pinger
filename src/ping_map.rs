@@ -170,8 +170,6 @@ struct State {
     render_pipeline: RenderPipeline,
     pan_zoom_buffer: Buffer,
     pan_zoom_bind_group: BindGroup,
-    block_index_buffer: Buffer,
-    block_index_bind_group: BindGroup,
     blocks: Vec<Option<Block>>,
     texture_bind_group_layout: BindGroupLayout,
     bits_per_block: u32,
@@ -231,9 +229,9 @@ impl State {
     fn paint<'a>(&'a self, render_pass: &mut RenderPass<'a>) {
         render_pass.set_pipeline(&self.render_pipeline);
         render_pass.set_bind_group(0, &self.bits_per_block_bind_group, &[]);
-        render_pass.set_bind_group(2, &self.pan_zoom_bind_group, &[]);
+        render_pass.set_bind_group(1, &self.pan_zoom_bind_group, &[]);
         for block in self.blocks.iter().filter_map(|m| m.as_ref()) {
-            render_pass.set_bind_group(1, &block.block_index_bind_group, &[]);
+            render_pass.set_bind_group(2, &block.block_index_bind_group, &[]);
             render_pass.set_bind_group(3, &block.texture_bind_group, &[]);
             render_pass.draw(0..6, 0..1);
         }
@@ -318,11 +316,6 @@ impl State {
             }],
             label: Some("Pan Zoom Bind Group"),
         });
-        let block_index_buffer = gpu.device.create_buffer_init(&BufferInitDescriptor {
-            label: Some("Block Index Buffer"),
-            contents: bytes_of(&0u32),
-            usage: BufferUsages::COPY_DST | BufferUsages::UNIFORM,
-        });
         let block_index_bind_group_layout =
             gpu.device
                 .create_bind_group_layout(&BindGroupLayoutDescriptor {
@@ -338,14 +331,6 @@ impl State {
                     }],
                     label: Some("Block Index Bind Group Layout"),
                 });
-        let block_index_bind_group = gpu.device.create_bind_group(&BindGroupDescriptor {
-            layout: &pan_zoom_bind_group_layout,
-            entries: &[BindGroupEntry {
-                binding: 0,
-                resource: block_index_buffer.as_entire_binding(),
-            }],
-            label: Some("Block Index Bind Group"),
-        });
         let texture_bind_group_layout =
             gpu.device
                 .create_bind_group_layout(&BindGroupLayoutDescriptor {
@@ -365,8 +350,8 @@ impl State {
             label: Some("Render Pipeline Layout"),
             bind_group_layouts: &[
                 &bits_per_block_bind_group_layout,
-                &block_index_bind_group_layout,
                 &pan_zoom_bind_group_layout,
+                &block_index_bind_group_layout,
                 &texture_bind_group_layout,
             ],
             push_constant_ranges: &[],
@@ -421,8 +406,6 @@ impl State {
             pan_zoom_buffer,
             pan_zoom_bind_group,
             blocks,
-            block_index_buffer,
-            block_index_bind_group,
             texture_bind_group_layout,
             bits_per_block_bind_group,
             bits_per_block_bind_group_layout,
@@ -550,7 +533,7 @@ impl Block {
             view_formats: &[texture_format],
         };
         let texture = device.create_texture(&texture_desc);
-        let shader_module = device.create_shader_module(include_wgsl!("block_shader.wgsl"));
+        let shader_module = device.create_shader_module(include_wgsl!("shader.wgsl"));
         let block_index_bind_group_layout =
             device.create_bind_group_layout(&BindGroupLayoutDescriptor {
                 entries: &[BindGroupLayoutEntry {
@@ -581,7 +564,7 @@ impl Block {
         let render_pipeline_layout = device.create_pipeline_layout(&pipeline_layout_desc);
         let vertex_state = VertexState {
             module: &shader_module,
-            entry_point: "vs_main",
+            entry_point: "vs_block",
             buffers: &[Instance::desc()],
         };
         let primitive_state = PrimitiveState {
@@ -595,7 +578,7 @@ impl Block {
         };
         let fragment_state = FragmentState {
             module: &shader_module,
-            entry_point: "fs_main",
+            entry_point: "fs_block",
             targets: &[Some(ColorTargetState {
                 format: texture_format,
                 blend: None,
