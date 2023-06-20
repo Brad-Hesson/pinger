@@ -67,7 +67,7 @@ impl Widget {
             let state = get_state(type_map);
             state.update_pan_zoom(queue, pan, zoom);
             if reset_buffers {
-                state.blocks.clear();
+                state.clear_blocks();
             }
             if !new_instances.is_empty() {
                 state.update_instances(device, queue, encoder, &new_instances);
@@ -233,6 +233,11 @@ impl State {
             ));
         }
         maybe_block.as_mut().unwrap()
+    }
+    fn clear_blocks(&mut self){
+        for block in &mut self.blocks{
+            *block = None;
+        }
     }
     fn new(gpu: &GpuState) -> Self {
         let max_buffer_size = gpu.device.limits().max_buffer_size;
