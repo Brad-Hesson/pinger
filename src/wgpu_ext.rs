@@ -6,7 +6,7 @@ use wgpu::{Buffer, BufferAddress, BufferDescriptor, BufferUsages, Device, Queue}
 pub struct BufferVec<T> {
     instance_buffers: Vec<(Buffer, usize)>,
     max_buffer_size: BufferAddress,
-    num_slots: usize,
+    max_num_slots: usize,
     _t: PhantomData<T>,
 }
 impl<T> BufferVec<T> {
@@ -15,7 +15,7 @@ impl<T> BufferVec<T> {
         Self {
             instance_buffers: vec![],
             max_buffer_size,
-            num_slots: (max_buffer_size / Self::DATA_SIZE) as _,
+            max_num_slots: (max_buffer_size / Self::DATA_SIZE) as _,
             _t: PhantomData,
         }
     }
@@ -30,7 +30,7 @@ impl<T> BufferVec<T> {
             0,
         ));
     }
-    #[tracing::instrument(skip_all, name="Extend Buffers")]
+    #[tracing::instrument(skip_all, name = "Extend Buffers")]
     pub fn extend(&mut self, device: &Device, queue: &Queue, mut data: &[T])
     where
         T: bytemuck::Pod,
@@ -40,7 +40,7 @@ impl<T> BufferVec<T> {
         }
         loop {
             let (buffer, num_occupied) = self.instance_buffers.last_mut().unwrap();
-            let remaining_slots = self.num_slots - *num_occupied;
+            let remaining_slots = self.max_num_slots - *num_occupied;
             let offset = *num_occupied as BufferAddress * Self::DATA_SIZE;
             if data.len() < remaining_slots {
                 queue.write_buffer(buffer, offset, cast_slice(data));
