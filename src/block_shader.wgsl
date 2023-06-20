@@ -1,6 +1,11 @@
 struct VertexOutput {
     @builtin(position) clip_position: vec4<f32>,
-    @location(1) uv: vec2<f32>
+    @location(1) texel: u32
+}
+
+struct Instance {
+    @location(0) address: u32,
+    @location(1) texel: u32
 }
 
 struct PanZoomUniform {
@@ -11,41 +16,30 @@ struct PanZoomUniform {
 @group(0) @binding(0)
 var<uniform> block_index: u32;
 
-@group(1) @binding(0)
-var<uniform> pan_zoom: PanZoomUniform;
-
-@group(2) @binding(0)
-var texture: texture_2d<u32>;
-
 const BLOCK_BITS: u32 = 3u;
 fn total_width() -> f32 {return f32(1u << 16u);}
 fn block_width() -> f32 {return f32(1u << (16u - BLOCK_BITS));}
 
 @vertex
-fn vs_main(@builtin(vertex_index) vertex_index: u32) -> VertexOutput {
+fn vs_main(instance: Instance, @builtin(vertex_index) vertex_index: u32) -> VertexOutput {
+    var coords_u = addr_to_coords(instance.address, 16u);
+    coords_u = coords_u % u32(block_width());
+    let coords = vec2<f32>(coords_u) / block_width() * 2. - 1.;
     var vertex = vertex_from_index(vertex_index);
-    vertex *= block_width() / total_width();
-    vertex += addr_to_coords(block_index, BLOCK_BITS);
+    vertex /= total_width();
+    vertex += coords;
     var out: VertexOutput;
     out.clip_position = vec4<f32>(vertex, 1., 1.);
-    out.uv = uv_from_index(vertex_index);
+    out.texel = instance.texel;
     return out;
 }
 
 @fragment
-fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
-    let uv = in.uv;
-    let texture_coords = vec2<i32>(round(uv * block_width()));
-    let texel = textureLoad(texture, texture_coords, 0);
-    return vec4<f32>(
-        f32(texel.x),
-        f32(texel.x),
-        f32(texel.x),
-        1.
-    );
+fn fs_main(in: VertexOutput) -> @location(0) vec4<u32> {
+    return vec4<u32>(in.texel);
 }
 
-fn addr_to_coords(d: u32, bits: u32) -> vec2<f32> {
+fn addr_to_coords(d: u32, bits: u32) -> vec2<u32> {
     var out = vec2<u32>(0u, 0u);
     var d = d;
     for (var s: u32 = 1u ; s < (1u << bits); s <<= 1u) {
@@ -68,7 +62,7 @@ fn addr_to_coords(d: u32, bits: u32) -> vec2<f32> {
         out.x = out.y;
         out.y = tmp;
     }
-    return vec2<f32>(out) * 2. / f32(1u << bits) - 1.;
+    return out;
 }
 
 fn color_from_u32(color: u32) -> vec4<f32> {
