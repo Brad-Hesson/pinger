@@ -10,25 +10,32 @@ mod wgpu_ext;
 
 #[tokio::main]
 async fn main() {
-    let (chrome_layer, _guard) = ChromeLayerBuilder::new()
-        .include_args(true)
-        .file("trace.json")
-        .build();
-    tracing_subscriber::registry().with(chrome_layer).init();
-    match Args::parse().subcommand {
+    let args = Args::parse();
+    if args.trace {
+        let (chrome_layer, _guard) = ChromeLayerBuilder::new()
+            .include_args(true)
+            .file("trace.json")
+            .build();
+        tracing_subscriber::registry().with(chrome_layer).init();
+    }
+    match args.subcommand {
         Subcommand::Ping(args) => ping::main(args).await,
-        Subcommand::Ui => ui::main().await,
+        Subcommand::Gui => ui::main().await,
     }
 }
 #[derive(Parser, Debug)]
 struct Args {
     #[command(subcommand)]
     subcommand: Subcommand,
+    /// Generate a trace file
+    #[arg(short, long)]
+    trace: bool,
 }
 
 #[derive(Debug, clap::Subcommand)]
 enum Subcommand {
     /// Ping a provided range of addresses and save the response durations to a file
     Ping(ping::Args),
-    Ui,
+    /// Open a GUI for viewing ping files
+    Gui,
 }
