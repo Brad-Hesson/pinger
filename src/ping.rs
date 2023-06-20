@@ -198,8 +198,8 @@ pub struct Args {
     /// A unitless nmumber representing how fast to send pings (higher is faster)
     #[arg(default_value_t = 2, short = 'f', long)]
     speed_factor: usize,
-    /// THe number of times to retry pinging each address
-    #[arg(default_value_t = 2, short, long)]
+    /// The number of times to retry pinging each address
+    #[arg(default_value_t = 5, short, long)]
     num_retries: usize,
     /// The interval for printings stats in seconds
     #[arg(default_value_t = 1, short, long)]
