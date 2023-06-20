@@ -13,20 +13,17 @@ struct PanZoomUniform {
     zoom: vec2<f32>
 }
 
-@group(0) @binding(0)
-var<uniform> block_index: u32;
-
 const BLOCK_BITS: u32 = 3u;
-fn total_width() -> f32 {return f32(1u << 16u);}
-fn block_width() -> f32 {return f32(1u << (16u - BLOCK_BITS));}
+fn total_width() -> u32 {return 1u << 16u;}
+fn block_width() -> u32 {return 1u << (16u - BLOCK_BITS);}
 
 @vertex
 fn vs_main(instance: Instance, @builtin(vertex_index) vertex_index: u32) -> VertexOutput {
     var coords_u = addr_to_coords(instance.address, 16u);
-    coords_u = coords_u % u32(block_width());
-    let coords = vec2<f32>(coords_u) / block_width() * 2. - 1.;
+    coords_u = coords_u % block_width();
+    let coords = (vec2<f32>(coords_u) + 0.5) / f32(block_width()) * 2. - 1.;
     var vertex = vertex_from_index(vertex_index);
-    vertex /= total_width();
+    vertex /= f32(total_width());
     vertex += coords;
     var out: VertexOutput;
     out.clip_position = vec4<f32>(vertex, 1., 1.);
@@ -35,8 +32,8 @@ fn vs_main(instance: Instance, @builtin(vertex_index) vertex_index: u32) -> Vert
 }
 
 @fragment
-fn fs_main(in: VertexOutput) -> @location(0) vec4<u32> {
-    return vec4<u32>(in.texel);
+fn fs_main(in: VertexOutput) -> @location(0) u32 {
+    return in.texel;
 }
 
 fn addr_to_coords(d: u32, bits: u32) -> vec2<u32> {

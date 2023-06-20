@@ -26,6 +26,8 @@ fn vs_main(@builtin(vertex_index) vertex_index: u32) -> VertexOutput {
     var vertex = vertex_from_index(vertex_index);
     vertex *= block_width() / total_width();
     vertex += addr_to_coords(block_index, BLOCK_BITS);
+    vertex += pan_zoom.pan;
+    vertex *= pan_zoom.zoom;
     var out: VertexOutput;
     out.clip_position = vec4<f32>(vertex, 1., 1.);
     out.uv = uv_from_index(vertex_index);
@@ -38,9 +40,9 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
     let texture_coords = vec2<i32>(round(uv * block_width()));
     let texel = textureLoad(texture, texture_coords, 0);
     return vec4<f32>(
-        f32(texel.x),
-        f32(texel.x),
-        f32(texel.x),
+        f32(texel.x) / 255.,
+        f32(texel.x) / 255.,
+        f32(texel.x) / 255.,
         1.
     );
 }
@@ -63,11 +65,11 @@ fn addr_to_coords(d: u32, bits: u32) -> vec2<f32> {
         out |= s * r;
         d >>= 2u;
     }
-    if (bits % 2u) == 1u {
-        let tmp = out.x;
-        out.x = out.y;
-        out.y = tmp;
-    }
+    // if (bits % 2u) == 1u {
+    //     let tmp = out.x;
+    //     out.x = out.y;
+    //     out.y = tmp;
+    // }
     return vec2<f32>(out) * 2. / f32(1u << bits) - 1.;
 }
 
@@ -92,10 +94,10 @@ fn vertex_from_index(index: u32) -> vec2<f32> {
 }
 fn uv_from_index(index: u32) -> vec2<f32> {
     switch index {
-        case 0u: {return vec2<f32>(0., 0.);}
-        case 1u, 3u: {return vec2<f32>(0., 1.);}
-        case 2u, 4u: {return vec2<f32>(1., 0.);}
-        case 5u: {return vec2<f32>(1., 1.);}
+        case 0u: {return vec2<f32>(0., 1.);}
+        case 1u, 3u: {return vec2<f32>(0., 0.);}
+        case 2u, 4u: {return vec2<f32>(1., 1.);}
+        case 5u: {return vec2<f32>(1., 0.);}
         default: {return vec2<f32>(0., 0.);}
     }
 }

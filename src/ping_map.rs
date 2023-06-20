@@ -90,6 +90,10 @@ impl Widget {
         rect: egui::Rect,
         response: &egui::Response,
     ) -> ([f32; 2], [f32; 2]) {
+        if ui.ctx().input(|i| i.key_pressed(egui::Key::Space)) {
+            self.zoom = 1.;
+            self.pan = vec2(0., 0.);
+        }
         // scale x or y down to make it render square
         let mut scale = vec2(
             1.0f32.min(rect.aspect_ratio().recip()),
@@ -181,6 +185,7 @@ impl State {
     ) {
         let modified = self.push_instances(device, queue, instances);
         for i in modified {
+            tracing::info!("Rendering Block {i}");
             self.get_block_mut(device, i).render(encoder);
         }
     }
@@ -289,7 +294,7 @@ impl State {
                 binding: 0,
                 resource: block_index_buffer.as_entire_binding(),
             }],
-            label: Some("Pan Zoom Bind Group"),
+            label: Some("Block Index Bind Group"),
         });
         let texture_bind_group_layout =
             gpu.device
@@ -382,8 +387,7 @@ async fn file_reader(path: impl AsRef<Path>, instance_tx: UnboundedSender<Instan
     for mut instance in instances {
         let val = read_f32_wait(&mut buf_reader, poll_dur).await.unwrap();
         if val >= 0. {
-            let color = (val / 0.5 * 255.).clamp(0., 255.) as u8;
-            instance.time = u32::from_be_bytes([color, 255 - color, 255 - color, 255]);
+            instance.time = (val / 0.5 * 255.).clamp(0., 255.) as u32;
             instance_tx.send(instance).unwrap();
         }
     }
@@ -457,23 +461,22 @@ pub struct Block {
     render_pipeline: RenderPipeline,
     instance_buffers: BufferVec<Instance>,
     block_index_bind_group: BindGroup,
-    _block_index_buffer: Buffer,
 }
 impl Block {
     pub fn new(device: &Device, index: u32, texture_bind_group_layout: &BindGroupLayout) -> Self {
         let side_length = 2u32.pow(16) / 8;
-        let max_buffer_size = std::mem::size_of::<Instance>() as BufferAddress
-            * side_length.pow(2) as BufferAddress
-            / 100;
+        let num_slots = side_length.pow(2) / 100;
+        let max_buffer_size =
+            std::mem::size_of::<Instance>() as BufferAddress * num_slots as BufferAddress;
         let block_index_buffer = device.create_buffer_init(&BufferInitDescriptor {
-            label: None,
+            label: Some("Block Index Buffer"),
             contents: bytes_of(&index),
             usage: BufferUsages::UNIFORM,
         });
-        let instance_buffers = BufferVec::new(max_buffer_size);
+        let instance_buffers = BufferVec::new(dbg!(max_buffer_size));
         let texture_format = TextureFormat::R8Uint;
         let texture_desc = TextureDescriptor {
-            label: None,
+            label: Some("Block Texture"),
             size: Extent3d {
                 width: side_length,
                 height: side_length,
@@ -484,7 +487,7 @@ impl Block {
             dimension: TextureDimension::D2,
             format: texture_format,
             usage: TextureUsages::RENDER_ATTACHMENT | TextureUsages::TEXTURE_BINDING,
-            view_formats: &[],
+            view_formats: &[texture_format],
         };
         let texture = device.create_texture(&texture_desc);
         let shader_module = device.create_shader_module(include_wgsl!("block_shader.wgsl"));
@@ -500,7 +503,7 @@ impl Block {
                     },
                     count: None,
                 }],
-                label: None,
+                label: Some("Block Index Bind Group Layout"),
             });
         let block_index_bind_group = device.create_bind_group(&BindGroupDescriptor {
             layout: &block_index_bind_group_layout,
@@ -508,11 +511,11 @@ impl Block {
                 binding: 0,
                 resource: block_index_buffer.as_entire_binding(),
             }],
-            label: Some("Pan Zoom Bind Group"),
+            label: Some("Block Index Bind Group"),
         });
         let pipeline_layout_desc = PipelineLayoutDescriptor {
-            label: Some("Render Pipeline Layout"),
-            bind_group_layouts: &[&block_index_bind_group_layout],
+            label: Some("Block Render Pipeline Layout"),
+            bind_group_layouts: &[],
             push_constant_ranges: &[],
         };
         let render_pipeline_layout = device.create_pipeline_layout(&pipeline_layout_desc);
@@ -545,7 +548,7 @@ impl Block {
             alpha_to_coverage_enabled: false,
         };
         let render_pipeline_desc = RenderPipelineDescriptor {
-            label: Some("Render Pipeline"),
+            label: Some("Block Render Pipeline"),
             layout: Some(&render_pipeline_layout),
             vertex: vertex_state,
             fragment: Some(fragment_state),
@@ -563,14 +566,13 @@ impl Block {
                     &texture.create_view(&TextureViewDescriptor::default()),
                 ),
             }],
-            label: Some("Pan Zoom Bind Group"),
+            label: Some("Texture Bind Group"),
         });
         Self {
             texture,
             render_pipeline,
             instance_buffers,
             block_index_bind_group,
-            _block_index_buffer: block_index_buffer,
             texture_bind_group,
         }
     }
@@ -583,7 +585,7 @@ impl Block {
                 resolve_target: None,
                 ops: Operations {
                     load: LoadOp::Clear(Color {
-                        r: 0.,
+                        r: 1.0,
                         g: 0.,
                         b: 0.,
                         a: 0.,
@@ -596,7 +598,6 @@ impl Block {
         {
             let mut render_pass = encoder.begin_render_pass(&render_pass_desc);
             render_pass.set_pipeline(&self.render_pipeline);
-            render_pass.set_bind_group(0, &self.block_index_bind_group, &[]);
             for (buffer, num_occupied) in &self.instance_buffers {
                 render_pass.set_vertex_buffer(0, buffer.slice(..));
                 render_pass.draw(0..6, 0..*num_occupied as _);
