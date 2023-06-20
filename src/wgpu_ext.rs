@@ -61,6 +61,10 @@ impl<T> BufferVec<T> {
     pub fn clear(&mut self) {
         self.instance_buffers.clear()
     }
+
+    pub fn len(&self) -> usize {
+        self.instance_buffers.len()
+    }
 }
 impl<'a, T> IntoIterator for &'a BufferVec<T> {
     type Item = &'a (Buffer, usize);

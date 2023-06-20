@@ -1,4 +1,5 @@
 use clap::Parser;
+use tracing::Level;
 use tracing_chrome::ChromeLayerBuilder;
 use tracing_subscriber::prelude::*;
 
@@ -17,6 +18,11 @@ async fn main() {
             .file("trace.json")
             .build();
         tracing_subscriber::registry().with(chrome_layer).init();
+    } else {
+        tracing_subscriber::FmtSubscriber::builder()
+            .with_max_level(Level::WARN)
+            .finish()
+            .init();
     }
     match args.subcommand {
         Subcommand::Ping(args) => ping::main(args).await,
