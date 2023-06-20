@@ -20,7 +20,7 @@ async fn main() {
         tracing_subscriber::registry().with(chrome_layer).init();
     } else {
         tracing_subscriber::FmtSubscriber::builder()
-            .with_max_level(Level::INFO)
+            .with_max_level(Level::WARN)
             .finish()
             .init();
     }

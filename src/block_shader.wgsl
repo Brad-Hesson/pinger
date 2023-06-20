@@ -8,19 +8,16 @@ struct Instance {
     @location(1) texel: u32
 }
 
-struct PanZoomUniform {
-    pan: vec2<f32>,
-    zoom: vec2<f32>
-}
+@group(0) @binding(0)
+var<uniform> bits_per_block: u32;
 
 const BLOCK_BITS: u32 = 3u;
 fn total_width() -> u32 {return 1u << 16u;}
-fn block_width() -> u32 {return 1u << (16u - BLOCK_BITS);}
+fn block_width() -> u32 {return 1u << bits_per_block;}
 
 @vertex
 fn vs_main(instance: Instance, @builtin(vertex_index) vertex_index: u32) -> VertexOutput {
-    var coords_u = addr_to_coords(instance.address, 16u);
-    coords_u = coords_u % block_width();
+    var coords_u = addr_to_coords(instance.address, 16u) % block_width();
     let coords = (vec2<f32>(coords_u) + 0.5) / f32(block_width()) * 2. - 1.;
     var vertex = vertex_from_index(vertex_index);
     vertex /= f32(total_width());
@@ -62,30 +59,12 @@ fn addr_to_coords(d: u32, bits: u32) -> vec2<u32> {
     return out;
 }
 
-fn color_from_u32(color: u32) -> vec4<f32> {
-    return vec4<f32>(
-        f32((color >> 24u) & 0xFFu),
-        f32((color >> 16u) & 0xFFu),
-        f32((color >> 8u) & 0xFFu),
-        f32((color >> 0u) & 0xFFu),
-    ) / 255.;
-}
-
 
 fn vertex_from_index(index: u32) -> vec2<f32> {
     switch index {
         case 0u: {return vec2<f32>(-1., -1.);}
         case 1u, 3u: {return vec2<f32>(-1., 1.);}
         case 2u, 4u: {return vec2<f32>(1., -1.);}
-        case 5u: {return vec2<f32>(1., 1.);}
-        default: {return vec2<f32>(0., 0.);}
-    }
-}
-fn uv_from_index(index: u32) -> vec2<f32> {
-    switch index {
-        case 0u: {return vec2<f32>(0., 0.);}
-        case 1u, 3u: {return vec2<f32>(0., 1.);}
-        case 2u, 4u: {return vec2<f32>(1., 0.);}
         case 5u: {return vec2<f32>(1., 1.);}
         default: {return vec2<f32>(0., 0.);}
     }

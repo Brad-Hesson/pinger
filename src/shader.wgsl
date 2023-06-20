@@ -9,23 +9,26 @@ struct PanZoomUniform {
 }
 
 @group(0) @binding(0)
-var<uniform> block_index: u32;
+var<uniform> bits_per_block: u32;
 
 @group(1) @binding(0)
-var<uniform> pan_zoom: PanZoomUniform;
+var<uniform> block_index: u32;
 
 @group(2) @binding(0)
+var<uniform> pan_zoom: PanZoomUniform;
+
+@group(3) @binding(0)
 var texture: texture_2d<u32>;
 
-const BLOCK_BITS: u32 = 3u;
 fn total_width() -> u32 {return 1u << 16u;}
-fn block_width() -> u32 {return 1u << (16u - BLOCK_BITS);}
+fn block_width() -> u32 {return 1u << bits_per_block;}
+fn block_bits() -> u32 {return 16u - bits_per_block;}
 
 @vertex
 fn vs_main(@builtin(vertex_index) vertex_index: u32) -> VertexOutput {
     var vertex = vertex_from_index(vertex_index);
     vertex /= f32(total_width() / block_width());
-    vertex += addr_to_coords(block_index, BLOCK_BITS);
+    vertex += addr_to_coords(block_index, block_bits());
     vertex += f32(block_width()) / f32(total_width());
     vertex += pan_zoom.pan;
     vertex *= pan_zoom.zoom;
