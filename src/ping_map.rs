@@ -185,7 +185,6 @@ impl State {
     ) {
         let modified = self.push_instances(device, queue, instances);
         for i in modified {
-            tracing::info!("Rendering Block {i}");
             self.get_block_mut(device, i).render(encoder);
         }
     }
@@ -585,7 +584,7 @@ impl Block {
                 resolve_target: None,
                 ops: Operations {
                     load: LoadOp::Clear(Color {
-                        r: 1.0,
+                        r: 0.,
                         g: 0.,
                         b: 0.,
                         a: 0.,

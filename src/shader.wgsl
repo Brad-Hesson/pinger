@@ -18,14 +18,15 @@ var<uniform> pan_zoom: PanZoomUniform;
 var texture: texture_2d<u32>;
 
 const BLOCK_BITS: u32 = 3u;
-fn total_width() -> f32 {return f32(1u << 16u);}
-fn block_width() -> f32 {return f32(1u << (16u - BLOCK_BITS));}
+fn total_width() -> u32 {return 1u << 16u;}
+fn block_width() -> u32 {return 1u << (16u - BLOCK_BITS);}
 
 @vertex
 fn vs_main(@builtin(vertex_index) vertex_index: u32) -> VertexOutput {
     var vertex = vertex_from_index(vertex_index);
-    vertex *= block_width() / total_width();
+    vertex /= f32(total_width() / block_width());
     vertex += addr_to_coords(block_index, BLOCK_BITS);
+    vertex += f32(block_width()) / f32(total_width());
     vertex += pan_zoom.pan;
     vertex *= pan_zoom.zoom;
     var out: VertexOutput;
@@ -37,12 +38,15 @@ fn vs_main(@builtin(vertex_index) vertex_index: u32) -> VertexOutput {
 @fragment
 fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
     let uv = in.uv;
-    let texture_coords = vec2<i32>(round(uv * block_width()));
-    let texel = textureLoad(texture, texture_coords, 0);
+    let texture_coords = vec2<i32>(uv * f32(block_width()));
+    let color = textureLoad(texture, texture_coords, 0).x;
+    if color == 0u {
+        return vec4<f32>(0.);
+    }
     return vec4<f32>(
-        f32(texel.x) / 255.,
-        f32(texel.x) / 255.,
-        f32(texel.x) / 255.,
+        f32(color) / 255.,
+        f32(255u - color) / 255.,
+        f32(255u - color) / 255.,
         1.
     );
 }
