@@ -30,7 +30,7 @@ pub struct Widget {
 
 impl Widget {
     pub fn new(gpu: &GpuState, egui_renderer: &mut egui_wgpu::Renderer) -> Self {
-        let state = State::new(gpu, 16 - 6);
+        let state = State::new(&gpu.device, &gpu.surface_config, gpu.sample_count, 16 - 6);
         let state_index = Self::insert_state(&mut egui_renderer.paint_callback_resources, state);
         Self {
             instance_rx: None,
@@ -255,60 +255,60 @@ impl State {
         }
         self.next_to_clear = 0;
     }
-    fn new(gpu: &GpuState, bits_per_block: u32) -> Self {
-        let shader_module = gpu
-            .device
-            .create_shader_module(include_wgsl!("shader.wgsl"));
-        let bits_per_block_buffer = gpu.device.create_buffer_init(&BufferInitDescriptor {
+    fn new(
+        device: &Device,
+        surface_config: &SurfaceConfiguration,
+        sample_count: u32,
+        bits_per_block: u32,
+    ) -> Self {
+        let shader_module = device.create_shader_module(include_wgsl!("shader.wgsl"));
+        let bits_per_block_buffer = device.create_buffer_init(&BufferInitDescriptor {
             label: Some("Bits per Block Buffer"),
             contents: bytes_of(&bits_per_block),
             usage: BufferUsages::COPY_DST | BufferUsages::UNIFORM,
         });
         let bits_per_block_bind_group_layout =
-            gpu.device
-                .create_bind_group_layout(&BindGroupLayoutDescriptor {
-                    entries: &[BindGroupLayoutEntry {
-                        binding: 0,
-                        visibility: ShaderStages::VERTEX | ShaderStages::FRAGMENT,
-                        ty: BindingType::Buffer {
-                            ty: BufferBindingType::Uniform,
-                            has_dynamic_offset: false,
-                            min_binding_size: None,
-                        },
-                        count: None,
-                    }],
-                    label: Some("Bits per Block Group Layout"),
-                });
-        let bits_per_block_bind_group =
-            Arc::new(gpu.device.create_bind_group(&BindGroupDescriptor {
-                layout: &bits_per_block_bind_group_layout,
-                entries: &[BindGroupEntry {
+            device.create_bind_group_layout(&BindGroupLayoutDescriptor {
+                entries: &[BindGroupLayoutEntry {
                     binding: 0,
-                    resource: bits_per_block_buffer.as_entire_binding(),
+                    visibility: ShaderStages::VERTEX | ShaderStages::FRAGMENT,
+                    ty: BindingType::Buffer {
+                        ty: BufferBindingType::Uniform,
+                        has_dynamic_offset: false,
+                        min_binding_size: None,
+                    },
+                    count: None,
                 }],
-                label: Some("Bits per Block Group"),
-            }));
-        let pan_zoom_buffer = gpu.device.create_buffer_init(&BufferInitDescriptor {
+                label: Some("Bits per Block Group Layout"),
+            });
+        let bits_per_block_bind_group = Arc::new(device.create_bind_group(&BindGroupDescriptor {
+            layout: &bits_per_block_bind_group_layout,
+            entries: &[BindGroupEntry {
+                binding: 0,
+                resource: bits_per_block_buffer.as_entire_binding(),
+            }],
+            label: Some("Bits per Block Group"),
+        }));
+        let pan_zoom_buffer = device.create_buffer_init(&BufferInitDescriptor {
             label: Some("Pan Zoom Buffer"),
             contents: bytes_of(&PanZoomUniform::default()),
             usage: BufferUsages::COPY_DST | BufferUsages::UNIFORM,
         });
         let pan_zoom_bind_group_layout =
-            gpu.device
-                .create_bind_group_layout(&BindGroupLayoutDescriptor {
-                    entries: &[BindGroupLayoutEntry {
-                        binding: 0,
-                        visibility: ShaderStages::VERTEX,
-                        ty: BindingType::Buffer {
-                            ty: BufferBindingType::Uniform,
-                            has_dynamic_offset: false,
-                            min_binding_size: None,
-                        },
-                        count: None,
-                    }],
-                    label: Some("Pan Zoom Bind Group Layout"),
-                });
-        let pan_zoom_bind_group = gpu.device.create_bind_group(&BindGroupDescriptor {
+            device.create_bind_group_layout(&BindGroupLayoutDescriptor {
+                entries: &[BindGroupLayoutEntry {
+                    binding: 0,
+                    visibility: ShaderStages::VERTEX,
+                    ty: BindingType::Buffer {
+                        ty: BufferBindingType::Uniform,
+                        has_dynamic_offset: false,
+                        min_binding_size: None,
+                    },
+                    count: None,
+                }],
+                label: Some("Pan Zoom Bind Group Layout"),
+            });
+        let pan_zoom_bind_group = device.create_bind_group(&BindGroupDescriptor {
             layout: &pan_zoom_bind_group_layout,
             entries: &[BindGroupEntry {
                 binding: 0,
@@ -317,35 +317,33 @@ impl State {
             label: Some("Pan Zoom Bind Group"),
         });
         let block_index_bind_group_layout =
-            gpu.device
-                .create_bind_group_layout(&BindGroupLayoutDescriptor {
-                    entries: &[BindGroupLayoutEntry {
-                        binding: 0,
-                        visibility: ShaderStages::VERTEX,
-                        ty: BindingType::Buffer {
-                            ty: BufferBindingType::Uniform,
-                            has_dynamic_offset: false,
-                            min_binding_size: None,
-                        },
-                        count: None,
-                    }],
-                    label: Some("Block Index Bind Group Layout"),
-                });
+            device.create_bind_group_layout(&BindGroupLayoutDescriptor {
+                entries: &[BindGroupLayoutEntry {
+                    binding: 0,
+                    visibility: ShaderStages::VERTEX,
+                    ty: BindingType::Buffer {
+                        ty: BufferBindingType::Uniform,
+                        has_dynamic_offset: false,
+                        min_binding_size: None,
+                    },
+                    count: None,
+                }],
+                label: Some("Block Index Bind Group Layout"),
+            });
         let texture_bind_group_layout =
-            gpu.device
-                .create_bind_group_layout(&BindGroupLayoutDescriptor {
-                    entries: &[BindGroupLayoutEntry {
-                        binding: 0,
-                        visibility: ShaderStages::FRAGMENT,
-                        ty: BindingType::Texture {
-                            sample_type: TextureSampleType::Uint,
-                            view_dimension: TextureViewDimension::D2,
-                            multisampled: false,
-                        },
-                        count: None,
-                    }],
-                    label: Some("Texture Bind Group Layout"),
-                });
+            device.create_bind_group_layout(&BindGroupLayoutDescriptor {
+                entries: &[BindGroupLayoutEntry {
+                    binding: 0,
+                    visibility: ShaderStages::FRAGMENT,
+                    ty: BindingType::Texture {
+                        sample_type: TextureSampleType::Uint,
+                        view_dimension: TextureViewDimension::D2,
+                        multisampled: false,
+                    },
+                    count: None,
+                }],
+                label: Some("Texture Bind Group Layout"),
+            });
         let pipeline_layout_desc = PipelineLayoutDescriptor {
             label: Some("Render Pipeline Layout"),
             bind_group_layouts: &[
@@ -356,7 +354,7 @@ impl State {
             ],
             push_constant_ranges: &[],
         };
-        let render_pipeline_layout = gpu.device.create_pipeline_layout(&pipeline_layout_desc);
+        let render_pipeline_layout = device.create_pipeline_layout(&pipeline_layout_desc);
         let vertex_state = VertexState {
             module: &shader_module,
             entry_point: "vs_main",
@@ -375,13 +373,13 @@ impl State {
             module: &shader_module,
             entry_point: "fs_main",
             targets: &[Some(ColorTargetState {
-                format: gpu.surface_config.format,
+                format: surface_config.format,
                 blend: Some(BlendState::REPLACE),
                 write_mask: ColorWrites::ALL,
             })],
         };
         let multisample_state = MultisampleState {
-            count: gpu.sample_count,
+            count: sample_count,
             mask: !0,
             alpha_to_coverage_enabled: false,
         };
@@ -395,7 +393,7 @@ impl State {
             multisample: multisample_state,
             multiview: None,
         };
-        let render_pipeline = gpu.device.create_render_pipeline(&render_pipeline_desc);
+        let render_pipeline = device.create_render_pipeline(&render_pipeline_desc);
         let num_blocks = 2usize.pow(16 - bits_per_block).pow(2);
         let mut blocks = Vec::with_capacity(num_blocks);
         for _ in 0..num_blocks {
