@@ -425,6 +425,9 @@ async fn file_reader(path: impl AsRef<Path>, instance_tx: UnboundedSender<Instan
         if val >= 0. {
             instance.time = (val / 0.5 * 255.).clamp(0., 255.) as u32;
             instance_tx.send(instance).unwrap();
+        }else{
+            instance.time = 255;
+            instance_tx.send(instance).unwrap();
         }
     }
 }
